@@ -1,0 +1,38 @@
+{
+  "name": "cue-conference",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "node scripts/migrate.mjs"
+  },
+  "dependencies": {
+    "next": "15.5.25",
+    "pg": "^8.23.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "stripe": "^22.6.2",
+    "uuid": "^14.0.2"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/uuid": "^11.0.0",
+    "dotenv": "^17.4.2",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.25",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.13",
+    "typescript": "^5",
+    "vitest": "^3.2.7"
+  }
+}

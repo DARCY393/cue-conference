@@ -1,0 +1,1090 @@
+openapi: 3.1.0
+info:
+  title: Cue Booking API
+  version: 0.1.0
+  description: |
+    MVP API for a single-space Request-to-book flow (Cue).
+    Stripe PaymentIntents use capture_method=manual: authorize on request,
+    capture on accept, cancel on decline/expire.
+servers:
+  - url: https://api.example.com/v1
+    description: Production
+  - url: http://localhost:3000/v1
+    description: Local
+
+tags:
+  - name: Spaces
+  - name: Quotes
+  - name: Bookings
+  - name: Host
+  - name: Webhooks
+
+paths:
+  /spaces/{slug}:
+    get:
+      tags: [Spaces]
+      operationId: getSpaceBySlug
+      summary: Public listing payload
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '200':
+          description: Space listing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpacePublic'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /spaces/{spaceId}/availability:
+    get:
+      tags: [Spaces]
+      operationId: getSpaceAvailability
+      summary: Busy intervals for a date range (bookings + blockouts)
+      parameters:
+        - $ref: '#/components/parameters/SpaceId'
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Busy ranges (half-open)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvailabilityResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /spaces/{spaceId}/quotes:
+    post:
+      tags: [Quotes]
+      operationId: createQuote
+      summary: Price a proposed booking window (no side effects)
+      parameters:
+        - $ref: '#/components/parameters/SpaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuoteRequest'
+      responses:
+        '200':
+          description: Quote
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quote'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Slot unavailable or outside bookable hours
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                unavailable:
+                  value:
+                    error: slot_unavailable
+                    message: That time overlaps an existing booking or blockout.
+                outside_hours:
+                  value:
+                    error: outside_bookable_hours
+                    message: Requested time is outside Mon–Fri 7:00–18:00 local.
+
+  /bookings:
+    post:
+      tags: [Bookings]
+      operationId: createBooking
+      summary: Create booking + Stripe PaymentIntent (manual capture)
+      description: |
+        Validates availability, inserts booking, creates PI with capture_method=manual.
+        Client confirms via Stripe Payment Element using client_secret.
+        Inventory moves to `requested` after PI reaches requires_capture (webhook or poll).
+      security:
+        - bearerAuth: []
+        - guestSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBookingRequest'
+      responses:
+        '201':
+          description: Booking created; confirm payment on client
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateBookingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /bookings/{bookingId}:
+    get:
+      tags: [Bookings]
+      operationId: getBooking
+      summary: Guest or host booking detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      responses:
+        '200':
+          description: Booking
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /bookings/{bookingId}/cancel:
+    post:
+      tags: [Bookings]
+      operationId: cancelBooking
+      summary: Cancel after accept; refund per Flexible policy
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 2000
+      responses:
+        '200':
+          description: Cancelled (refund may be 0)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelBookingResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Not cancellable in current status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /host/bookings:
+    get:
+      tags: [Host]
+      operationId: listHostBookings
+      summary: Host booking queue / calendar list
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/BookingStatus'
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Bookings for host spaces
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /host/bookings/{bookingId}/accept:
+    post:
+      tags: [Host]
+      operationId: acceptBooking
+      summary: Capture PaymentIntent and confirm booking
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      responses:
+        '200':
+          description: Accepted and captured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Not requested, expired, or slot conflict on re-check
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /host/bookings/{bookingId}/decline:
+    post:
+      tags: [Host]
+      operationId: declineBooking
+      summary: Cancel PaymentIntent hold and decline
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 2000
+      responses:
+        '200':
+          description: Declined; hold released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /host/bookings/{bookingId}/overtime:
+    post:
+      tags: [Host]
+      operationId: chargeOvertime
+      summary: Off-session PaymentIntent for overtime (30-min steps, 1.5×)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OvertimeRequest'
+      responses:
+        '201':
+          description: Overtime charged (or requires guest authentication)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OvertimeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /host/blockouts:
+    post:
+      tags: [Host]
+      operationId: createBlockout
+      summary: Block a time range on a space
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBlockoutRequest'
+      responses:
+        '201':
+          description: Blockout created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Blockout'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Overlaps another blockout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      tags: [Host]
+      operationId: listBlockouts
+      summary: List blockouts for a space
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: spaceId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Blockouts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Blockout'
+
+  /host/blockouts/{blockoutId}:
+    delete:
+      tags: [Host]
+      operationId: deleteBlockout
+      summary: Remove a blockout
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: blockoutId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /webhooks/stripe:
+    post:
+      tags: [Webhooks]
+      operationId: stripeWebhook
+      summary: Stripe webhook receiver
+      description: |
+        Verify `Stripe-Signature`. Idempotently upsert payment_events, then
+        reconcile booking status. Do not make accept/decline decisions here.
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: Raw Stripe Event JSON
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [received]
+                properties:
+                  received:
+                    type: boolean
+                    const: true
+        '400':
+          description: Invalid signature or payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Host or authenticated guest
+    guestSession:
+      type: apiKey
+      in: header
+      name: X-Guest-Session
+      description: Optional lightweight guest session for checkout
+
+  parameters:
+    Slug:
+      name: slug
+      in: path
+      required: true
+      schema:
+        type: string
+        example: cue-dallas
+    SpaceId:
+      name: spaceId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BookingId:
+      name: bookingId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid auth
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Authenticated but not allowed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: State conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          examples: [slot_unavailable, outside_bookable_hours, invalid_status]
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    MoneyCents:
+      type: integer
+      minimum: 0
+      description: Integer cents (USD)
+
+    BookingStatus:
+      type: string
+      enum:
+        - draft
+        - requested
+        - accepted
+        - declined
+        - expired
+        - cancelled
+        - in_progress
+        - completed
+
+    AddonUnit:
+      type: string
+      enum: [per_booking, per_day, per_item]
+
+    SpacePublic:
+      type: object
+      required:
+        - id
+        - slug
+        - title
+        - city
+        - timezone
+        - capacity
+        - status
+        - pricing
+        - bookableHours
+        - photos
+        - amenities
+        - addons
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        title:
+          type: string
+          example: Cue
+        subtitle:
+          type: string
+          example: Bright 10 Person Conference Room in Dallas
+        description:
+          type: string
+        city:
+          type: string
+        neighborhood:
+          type: string
+        timezone:
+          type: string
+          example: America/Chicago
+        capacity:
+          type: integer
+          example: 10
+        status:
+          type: string
+          enum: [draft, live, paused]
+        pricing:
+          type: object
+          required:
+            - currency
+            - baseHourlyCents
+            - minHours
+            - longBookingThresholdHours
+            - longBookingDiscountBps
+            - overtimeMultiplier
+            - cleaningIncluded
+          properties:
+            currency:
+              type: string
+              example: usd
+            baseHourlyCents:
+              $ref: '#/components/schemas/MoneyCents'
+            minHours:
+              type: number
+              example: 1
+            longBookingThresholdHours:
+              type: number
+              example: 8
+            longBookingDiscountBps:
+              type: integer
+              example: 2000
+              description: 2000 = 20% off
+            overtimeMultiplier:
+              type: number
+              example: 1.5
+            cleaningIncluded:
+              type: boolean
+        bookableHours:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookableHours'
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpacePhoto'
+        amenities:
+          type: array
+          items:
+            type: object
+            required: [key, label]
+            properties:
+              key:
+                type: string
+              label:
+                type: string
+        addons:
+          type: array
+          items:
+            $ref: '#/components/schemas/AddonPublic'
+        hostRulesMd:
+          type: string
+        healthSafetyMd:
+          type: string
+        cancellationPolicy:
+          $ref: '#/components/schemas/CancellationPolicyPublic'
+        approxLocation:
+          type: object
+          properties:
+            lat:
+              type: number
+            lng:
+              type: number
+        host:
+          type: object
+          properties:
+            name:
+              type: string
+              example: Darcy Y.
+
+    SpacePhoto:
+      type: object
+      required: [url, sortOrder]
+      properties:
+        url:
+          type: string
+          format: uri
+        alt:
+          type: string
+        sortOrder:
+          type: integer
+
+    BookableHours:
+      type: object
+      required: [weekday, startMinute, endMinute]
+      properties:
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: 0=Sunday … 6=Saturday
+        startMinute:
+          type: integer
+          example: 420
+        endMinute:
+          type: integer
+          example: 1080
+
+    AddonPublic:
+      type: object
+      required: [id, name, priceCents, unit, leadTimeHours]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Parking
+        description:
+          type: string
+        priceCents:
+          $ref: '#/components/schemas/MoneyCents'
+        unit:
+          $ref: '#/components/schemas/AddonUnit'
+        leadTimeHours:
+          type: integer
+          example: 24
+        requiresGuestFields:
+          type: array
+          items:
+            type: string
+          example: [emails, phones]
+
+    CancellationPolicyPublic:
+      type: object
+      required: [name, rules]
+      properties:
+        name:
+          type: string
+          example: Flexible
+        rules:
+          type: object
+          additionalProperties: true
+
+    AvailabilityBusy:
+      type: object
+      required: [startsAt, endsAt, kind]
+      properties:
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        kind:
+          type: string
+          enum: [booking, blockout]
+
+    AvailabilityResponse:
+      type: object
+      required: [spaceId, timezone, busy]
+      properties:
+        spaceId:
+          type: string
+          format: uuid
+        timezone:
+          type: string
+        busy:
+          type: array
+          items:
+            $ref: '#/components/schemas/AvailabilityBusy'
+
+    QuoteAddonInput:
+      type: object
+      required: [addonId]
+      properties:
+        addonId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          default: 1
+
+    QuoteRequest:
+      type: object
+      required: [startsAt, endsAt]
+      properties:
+        startsAt:
+          type: string
+          format: date-time
+          description: Instant; interpreted with space timezone for hours checks
+        endsAt:
+          type: string
+          format: date-time
+        addons:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuoteAddonInput'
+
+    Quote:
+      type: object
+      required:
+        - currency
+        - hours
+        - baseCents
+        - discountCents
+        - addonsCents
+        - feesCents
+        - taxCents
+        - totalCents
+        - available
+      properties:
+        currency:
+          type: string
+          example: usd
+        hours:
+          type: number
+          example: 1
+        baseCents:
+          $ref: '#/components/schemas/MoneyCents'
+        discountCents:
+          $ref: '#/components/schemas/MoneyCents'
+        addonsCents:
+          $ref: '#/components/schemas/MoneyCents'
+        feesCents:
+          $ref: '#/components/schemas/MoneyCents'
+          description: Optional platform/processing fee you choose to charge
+        taxCents:
+          $ref: '#/components/schemas/MoneyCents'
+        totalCents:
+          $ref: '#/components/schemas/MoneyCents'
+        available:
+          type: boolean
+        lineItems:
+          type: array
+          items:
+            type: object
+            required: [code, label, amountCents]
+            properties:
+              code:
+                type: string
+                examples: [space, discount_long_booking, addon_parking, fee, tax]
+              label:
+                type: string
+              amountCents:
+                type: integer
+                description: Negative for discounts
+        expiresAt:
+          type: string
+          format: date-time
+          description: Optional quote TTL for UI only
+
+    CreateBookingAddonInput:
+      allOf:
+        - $ref: '#/components/schemas/QuoteAddonInput'
+        - type: object
+          properties:
+            meta:
+              type: object
+              additionalProperties: true
+              description: e.g. parking emails/phones
+              example:
+                emails: ['guest@acme.com']
+                phones: ['+12145551212']
+
+    CreateBookingRequest:
+      type: object
+      required: [spaceId, startsAt, endsAt, guest]
+      properties:
+        spaceId:
+          type: string
+          format: uuid
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        addons:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreateBookingAddonInput'
+        guestNotes:
+          type: string
+        activityDescription:
+          type: string
+        guest:
+          type: object
+          required: [name, email]
+          properties:
+            name:
+              type: string
+            email:
+              type: string
+              format: email
+            phone:
+              type: string
+
+    CreateBookingResponse:
+      type: object
+      required: [booking, stripe]
+      properties:
+        booking:
+          $ref: '#/components/schemas/Booking'
+        stripe:
+          type: object
+          required: [paymentIntentId, clientSecret, captureMethod]
+          properties:
+            paymentIntentId:
+              type: string
+              example: pi_123
+            clientSecret:
+              type: string
+            captureMethod:
+              type: string
+              const: manual
+
+    BookingAddon:
+      type: object
+      required: [addonId, name, quantity, unitPriceCents]
+      properties:
+        addonId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        quantity:
+          type: integer
+        unitPriceCents:
+          $ref: '#/components/schemas/MoneyCents'
+        meta:
+          type: object
+          additionalProperties: true
+
+    Booking:
+      type: object
+      required:
+        - id
+        - spaceId
+        - status
+        - startsAt
+        - endsAt
+        - currency
+        - subtotalCents
+        - discountCents
+        - addonsCents
+        - feesCents
+        - taxCents
+        - totalCents
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        spaceId:
+          type: string
+          format: uuid
+        guestId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/BookingStatus'
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        guestNotes:
+          type: string
+        activityDescription:
+          type: string
+        currency:
+          type: string
+        subtotalCents:
+          $ref: '#/components/schemas/MoneyCents'
+        discountCents:
+          $ref: '#/components/schemas/MoneyCents'
+        addonsCents:
+          $ref: '#/components/schemas/MoneyCents'
+        feesCents:
+          $ref: '#/components/schemas/MoneyCents'
+        taxCents:
+          $ref: '#/components/schemas/MoneyCents'
+        totalCents:
+          $ref: '#/components/schemas/MoneyCents'
+        addons:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookingAddon'
+        requestedAt:
+          type: string
+          format: date-time
+        hostActionDeadlineAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type: string
+          format: date-time
+        cancelledAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        stripePaymentIntentId:
+          type: string
+        accessDetails:
+          type: string
+          description: Private address / entry instructions; only when status=accepted+
+        createdAt:
+          type: string
+          format: date-time
+
+    CancelBookingResponse:
+      type: object
+      required: [booking, refundCents]
+      properties:
+        booking:
+          $ref: '#/components/schemas/Booking'
+        refundCents:
+          $ref: '#/components/schemas/MoneyCents'
+        refundId:
+          type: string
+          description: Stripe refund id when refundCents > 0
+
+    OvertimeRequest:
+      type: object
+      required: [extraMinutes]
+      properties:
+        extraMinutes:
+          type: integer
+          minimum: 30
+          multipleOf: 30
+          example: 30
+        note:
+          type: string
+
+    OvertimeResponse:
+      type: object
+      required: [amountCents, status]
+      properties:
+        amountCents:
+          $ref: '#/components/schemas/MoneyCents'
+        status:
+          type: string
+          enum: [succeeded, requires_action]
+        paymentIntentId:
+          type: string
+        clientSecret:
+          type: string
+          description: Present when SCA required (requires_action)
+
+    CreateBlockoutRequest:
+      type: object
+      required: [spaceId, startsAt, endsAt]
+      properties:
+        spaceId:
+          type: string
+          format: uuid
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+
+    Blockout:
+      type: object
+      required: [id, spaceId, startsAt, endsAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        spaceId:
+          type: string
+          format: uuid
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
