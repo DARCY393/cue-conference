@@ -172,20 +172,33 @@ export async function createBookingRequest(body: {
   }
 
   // DB path (simplified MVP insert)
-  const guestRes = await query<{ id: string }>(
-    `INSERT INTO users (role, name, email, phone)
-     VALUES ('guest', $1, $2, $3)
-     ON CONFLICT DO NOTHING
-     RETURNING id`,
-    [body.guest.name, body.guest.email, body.guest.phone ?? null]
-  );
-  let guestId = guestRes.rows[0]?.id;
-  if (!guestId) {
+  // Unique index is on lower(email) — cannot use bare ON CONFLICT DO NOTHING.
+  // Select-then-insert; on race, select again.
+  let guestId: string | undefined;
+  {
     const existing = await query<{ id: string }>(
       `SELECT id FROM users WHERE lower(email) = lower($1)`,
       [body.guest.email]
     );
     guestId = existing.rows[0]?.id;
+  }
+  if (!guestId) {
+    try {
+      const inserted = await query<{ id: string }>(
+        `INSERT INTO users (role, name, email, phone)
+         VALUES ('guest', $1, $2, $3)
+         RETURNING id`,
+        [body.guest.name, body.guest.email, body.guest.phone ?? null]
+      );
+      guestId = inserted.rows[0]?.id;
+    } catch {
+      // Concurrent insert won the unique index race — re-select.
+      const again = await query<{ id: string }>(
+        `SELECT id FROM users WHERE lower(email) = lower($1)`,
+        [body.guest.email]
+      );
+      guestId = again.rows[0]?.id;
+    }
   }
   if (!guestId) throw new Error("Failed to upsert guest");
 

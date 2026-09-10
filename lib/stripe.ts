@@ -35,6 +35,7 @@ export async function createManualCapturePaymentIntent(opts: {
     amount: opts.amountCents,
     currency: opts.currency,
     capture_method: "manual",
+    setup_future_usage: "off_session",
     metadata: opts.metadata,
     receipt_email: opts.customerEmail,
     automatic_payment_methods: { enabled: true },

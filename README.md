@@ -48,10 +48,22 @@ npm run db:migrate
 
 Migrations live in `migrations/001_extensions.sql` … `008_seed_cue.sql` (see `migrations/README.md`).
 
-3. Set `STRIPE_SECRET_KEY` (and optionally `STRIPE_WEBHOOK_SECRET`).
+3. Set `STRIPE_SECRET_KEY` and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (and optionally `STRIPE_WEBHOOK_SECRET`). See **Stripe test mode checklist** below.
 4. `npm run dev`
 
 Webhook endpoint: `POST /api/v1/webhooks/stripe`.
+
+
+## Stripe test mode checklist
+
+1. Copy `.env.example` → `.env` and set **test** keys:
+   - `STRIPE_SECRET_KEY=sk_test_…`
+   - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_…`
+2. Restart `npm run dev` so Next.js picks up `NEXT_PUBLIC_*`.
+3. Open the guest page, request a booking, then enter card **`4242 4242 4242 4242`** (any future expiry, any CVC) in the Payment Element and confirm.
+4. In the host UI, **accept** the request — that captures the manual-capture PaymentIntent. Decline cancels the hold.
+
+Without Stripe keys, bookings still work with mock `*_secret_mock` client secrets (demo mode banner on the guest form).
 
 ## Scripts
 

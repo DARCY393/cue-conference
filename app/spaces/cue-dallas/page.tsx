@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { loadStripe } from "@stripe/stripe-js";
+import {
+  Elements,
+  PaymentElement,
+  useElements,
+  useStripe,
+} from "@stripe/react-stripe-js";
 import type { Quote, SpacePublic } from "@/lib/types";
 
 function money(cents: number) {
@@ -8,6 +15,73 @@ function money(cents: number) {
     style: "currency",
     currency: "USD",
   }).format(cents / 100);
+}
+
+const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
+const stripePromise = publishableKey ? loadStripe(publishableKey) : null;
+
+function isMockSecret(secret: string) {
+  return secret.includes("_secret_mock");
+}
+
+function PaymentConfirmPanel({
+  onSuccess,
+  onError,
+}: {
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [confirming, setConfirming] = useState(false);
+
+  async function handleConfirm() {
+    if (!stripe || !elements) return;
+    setConfirming(true);
+    onError("");
+    try {
+      const { error, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        redirect: "if_required",
+      });
+      if (error) {
+        onError(error.message || "Payment confirmation failed");
+        return;
+      }
+      const status = paymentIntent?.status ?? "unknown";
+      if (
+        status === "requires_capture" ||
+        status === "succeeded" ||
+        status === "processing"
+      ) {
+        onSuccess(
+          status === "requires_capture"
+            ? "Card authorized. Host accept will capture the hold."
+            : `Payment ${status}.`
+        );
+      } else {
+        onError(`Unexpected payment status: ${status}`);
+      }
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Payment confirmation failed");
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <PaymentElement />
+      <button
+        type="button"
+        onClick={() => void handleConfirm()}
+        disabled={!stripe || !elements || confirming}
+        className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+      >
+        {confirming ? "Confirming…" : "Confirm payment"}
+      </button>
+    </div>
+  );
 }
 
 export default function CueDallasPage() {
@@ -28,6 +102,8 @@ export default function CueDallasPage() {
     bookingId: string;
     clientSecret: string;
   } | null>(null);
+  const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/spaces/cue-dallas")
@@ -76,11 +152,13 @@ export default function CueDallasPage() {
     if (windowIso && space) void refreshQuote();
   }, [windowIso, space, parking, refreshQuote]);
 
-  async function submitBooking(e: React.FormEvent) {
+  async function submitBooking(e: FormEvent) {
     e.preventDefault();
     if (!space || !windowIso) return;
     setSubmitting(true);
     setError(null);
+    setPaymentMessage(null);
+    setPaymentError(null);
     try {
       const addons = parking
         ? [{ addonId: space.addons[0]?.id, quantity: 1 }]
@@ -299,15 +377,66 @@ export default function CueDallasPage() {
           </label>
           {error && <p className="text-sm text-red-600">{error}</p>}
           {result ? (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-              <p className="font-medium">Request created</p>
-              <p className="mt-1 break-all">Booking: {result.bookingId}</p>
-              <p className="mt-1 break-all text-xs">
-                Stripe client_secret (demo/mock OK): {result.clientSecret}
-              </p>
-              <p className="mt-2 text-xs">
-                Payment uses manual capture — host accept will capture the hold.
-              </p>
+            <div className="space-y-3">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                <p className="font-medium">Request created</p>
+                <p className="mt-1 break-all">Booking: {result.bookingId}</p>
+                <p className="mt-2 text-xs">
+                  Payment uses manual capture — host accept will capture the hold.
+                </p>
+              </div>
+
+              {isMockSecret(result.clientSecret) ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  <p className="font-medium">Demo mode</p>
+                  <p className="mt-1 text-xs">
+                    Stripe keys are unset, so this booking used a mock PaymentIntent.
+                    Set <code className="font-mono">STRIPE_SECRET_KEY</code> and{" "}
+                    <code className="font-mono">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code>{" "}
+                    for real test-mode card collection.
+                  </p>
+                  <p className="mt-1 break-all text-xs opacity-70">
+                    {result.clientSecret}
+                  </p>
+                </div>
+              ) : !stripePromise || !publishableKey ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  Booking created, but{" "}
+                  <code className="font-mono">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code>{" "}
+                  is missing — cannot load Stripe Payment Element.
+                </div>
+              ) : paymentMessage ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                  <p className="font-medium">Payment confirmed</p>
+                  <p className="mt-1">{paymentMessage}</p>
+                </div>
+              ) : (
+                <div className="space-y-2 rounded-xl border border-slate-200 p-3">
+                  <p className="text-sm font-medium text-slate-800">
+                    Enter payment details
+                  </p>
+                  <Elements
+                    stripe={stripePromise}
+                    options={{
+                      clientSecret: result.clientSecret,
+                      appearance: { theme: "stripe" },
+                    }}
+                  >
+                    <PaymentConfirmPanel
+                      onSuccess={(msg) => {
+                        setPaymentMessage(msg);
+                        setPaymentError(null);
+                      }}
+                      onError={(msg) => {
+                        setPaymentError(msg || null);
+                      }}
+                    />
+                  </Elements>
+                  {paymentError && (
+                    <p className="text-sm text-red-600">{paymentError}</p>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <button
