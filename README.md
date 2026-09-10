@@ -37,6 +37,135 @@ npm run dev
 - Guest UI: [http://localhost:3000/spaces/cue-dallas](http://localhost:3000/spaces/cue-dallas)
 - Host UI: [http://localhost:3000/host](http://localhost:3000/host) — send `Authorization: Bearer <HOST_EMAIL>` (default `host@example.com`)
 
+
+## Tailscale host — same-server Postgres checklist
+
+Use this when the app runs on a machine reachable over Tailscale and Postgres lives on **that same host**. Keep Postgres off the public internet.
+
+### 1. Install Postgres (Ubuntu/Debian example)
+
+```bash
+sudo apt update
+sudo apt install -y postgresql postgresql-contrib
+sudo systemctl enable --now postgresql
+```
+
+Docker alternative (still bind to localhost only):
+
+```bash
+docker run -d --name cue-pg \
+  -e POSTGRES_USER=cue \
+  -e POSTGRES_PASSWORD='choose-a-strong-password' \
+  -e POSTGRES_DB=cue \
+  -p 127.0.0.1:5432:5432 \
+  --restart unless-stopped \
+  postgres:16
+```
+
+### 2. Create role + database (apt install path)
+
+```bash
+sudo -u postgres psql <<'SQL'
+CREATE USER cue WITH PASSWORD 'choose-a-strong-password';
+CREATE DATABASE cue OWNER cue;
+\c cue
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- btree_gist is created by migration 001 as well
+SQL
+```
+
+Confirm it listens locally only (typical default). Do **not** open `5432/udp` or `5432/tcp` in a public firewall. Tailscale access to the *app* is enough; the app uses `127.0.0.1`.
+
+### 3. Clone app + Node
+
+```bash
+git clone https://github.com/DARCY393/cue-conference.git
+cd cue-conference
+# Node 18+ required
+npm install
+```
+
+### 4. `.env` on the server
+
+```bash
+cp .env.example .env
+chmod 600 .env
+```
+
+Edit `.env`:
+
+```bash
+DATABASE_URL=postgres://cue:choose-a-strong-password@127.0.0.1:5432/cue
+
+STRIPE_SECRET_KEY=sk_test_...
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
+# STRIPE_WEBHOOK_SECRET=whsec_...   # after `stripe listen` or a public webhook endpoint
+
+HOST_EMAIL=you@yourdomain.com
+NEXT_PUBLIC_APP_URL=http://cue-server:3000
+# Prefer your MagicDNS name or Tailscale IP, e.g.
+# NEXT_PUBLIC_APP_URL=http://100.x.y.z:3000
+```
+
+Notes:
+- `DATABASE_URL` must be `127.0.0.1` (or the Docker bridge only if Postgres is containerized and you know the network). Avoid `0.0.0.0` bind for Postgres.
+- Setting `DATABASE_URL` leaves **demo/in-memory mode** and uses real SQL (migrations + seed).
+- Stripe keys are optional until you want real Payment Element; without them you still get mock PI secrets.
+
+### 5. Migrate + seed
+
+```bash
+npm run db:migrate
+```
+
+That applies `migrations/001` … `008` (Cue seed included). Safe to re-run only on a fresh DB — the migrate script re-applies files in order and is not yet idempotent for a second full run on a populated DB.
+
+### 6. Run the app (Tailscale-only access)
+
+Dev:
+
+```bash
+npm run dev -- -H 0.0.0.0 -p 3000
+```
+
+Or production:
+
+```bash
+npm run build
+npm run start -- -H 0.0.0.0 -p 3000
+```
+
+Bind `0.0.0.0` so other devices on your **tailnet** can hit the MagicDNS name/IP. Keep the host’s **public** firewall closed on `3000` unless you intentionally publish it. Access from your laptop over Tailscale:
+
+- Guest: `http://<tailscale-name-or-ip>:3000/spaces/cue-dallas`
+- Host: `http://<tailscale-name-or-ip>:3000/host` (email must match `HOST_EMAIL`)
+
+### 7. Stripe webhooks on a private host
+
+Tailscale does not expose webhooks to Stripe by default. For test mode on the server:
+
+```bash
+# Install Stripe CLI, then:
+stripe listen --forward-to localhost:3000/api/v1/webhooks/stripe
+```
+
+Put the printed `whsec_…` into `STRIPE_WEBHOOK_SECRET` and restart the app. For live mode later: Tailscale Funnel, Cloudflare Tunnel, or any public HTTPS reverse proxy.
+
+### 8. Smoke test
+
+1. Open guest page over Tailscale → request booking (Mon–Fri 7–18 Chicago).
+2. With Stripe test keys: pay with `4242 4242 4242 4242`.
+3. Host page → accept (captures) or decline (releases hold).
+4. Confirm row in DB: `psql "$DATABASE_URL" -c "select id,status,total_cents from bookings order by created_at desc limit 5;"`
+
+### Security quick list
+
+- [ ] Postgres bound to localhost (or tailnet-only), not public
+- [ ] `.env` mode `600`, not committed
+- [ ] Strong DB password
+- [ ] App port only needed on tailnet (or behind your chosen tunnel)
+- [ ] Stripe **test** keys until go-live
+
 ## With Postgres + Stripe
 
 1. Create a database and set `DATABASE_URL` in `.env`.
