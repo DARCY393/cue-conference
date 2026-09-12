@@ -24,6 +24,31 @@ function isMockSecret(secret: string) {
   return secret.includes("_secret_mock");
 }
 
+function normalizeTime(value: string): string {
+  const v = value.trim();
+  // Already HH:MM or HH:MM:SS
+  const m24 = /^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/.exec(v);
+  if (m24) return `${m24[1].padStart(2, "0")}:${m24[2]}`;
+  // 12h like 9:00 AM / 12:00 PM
+  const m12 = /^(\d{1,2}):([0-5]\d)\s*(AM|PM)$/i.exec(v);
+  if (m12) {
+    let h = parseInt(m12[1], 10);
+    const min = m12[2];
+    const ap = m12[3].toUpperCase();
+    if (ap === "AM") {
+      if (h === 12) h = 0;
+    } else if (h !== 12) {
+      h += 12;
+    }
+    return `${String(h).padStart(2, "0")}:${min}`;
+  }
+  return v;
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 function PaymentConfirmPanel({
   onSuccess,
   onError,
@@ -119,8 +144,10 @@ export default function CueDallasPage() {
     if (!date || !space) return null;
     // Build local Chicago wall times as ISO by appending offset approximation via Date parsing as local —
     // For MVP UI we send as America/Chicago wall clock with -06:00/-05:00 naive: use Date constructed and toISOString.
-    const startsAt = new Date(`${date}T${startTime}:00`);
-    const endsAt = new Date(`${date}T${endTime}:00`);
+    const start = normalizeTime(startTime);
+    const end = normalizeTime(endTime);
+    const startsAt = new Date(`${date}T${start}:00`);
+    const endsAt = new Date(`${date}T${end}:00`);
     return { startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() };
   }, [date, startTime, endTime, space]);
 
@@ -155,6 +182,22 @@ export default function CueDallasPage() {
   async function submitBooking(e: FormEvent) {
     e.preventDefault();
     if (!space || !windowIso) return;
+    if (!date) {
+      setError("Pick a date.");
+      return;
+    }
+    if (!normalizeTime(startTime) || !normalizeTime(endTime)) {
+      setError("Pick a start and end time (use the time picker).");
+      return;
+    }
+    if (!guestName.trim()) {
+      setError("Enter your name.");
+      return;
+    }
+    if (!isValidEmail(guestEmail)) {
+      setError("Enter a valid email address.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     setPaymentMessage(null);
@@ -267,6 +310,7 @@ export default function CueDallasPage() {
 
       <section className="lg:col-span-2">
         <form
+          noValidate
           onSubmit={submitBooking}
           className="sticky top-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
         >
@@ -286,9 +330,10 @@ export default function CueDallasPage() {
               <span className="text-slate-600">Start</span>
               <input
                 type="time"
+                step={1800}
                 required
                 value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+                onChange={(e) => setStartTime(normalizeTime(e.target.value))}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               />
             </label>
@@ -296,9 +341,10 @@ export default function CueDallasPage() {
               <span className="text-slate-600">End</span>
               <input
                 type="time"
+                step={1800}
                 required
                 value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
+                onChange={(e) => setEndTime(normalizeTime(e.target.value))}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               />
             </label>
@@ -351,7 +397,9 @@ export default function CueDallasPage() {
           <label className="block text-sm">
             <span className="text-slate-600">Email</span>
             <input
-              type="email"
+              type="text"
+              inputMode="email"
+              autoComplete="email"
               required
               value={guestEmail}
               onChange={(e) => setGuestEmail(e.target.value)}
