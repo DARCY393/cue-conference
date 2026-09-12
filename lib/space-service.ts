@@ -110,7 +110,11 @@ export async function getSpaceBySlug(slug: string): Promise<SpacePublic | null> 
       priceCents: a.price_cents,
       unit: a.unit as SpacePublic["addons"][0]["unit"],
       leadTimeHours: a.lead_time_hours,
-      requiresGuestFields: a.requires_guest_fields,
+      requiresGuestFields: Array.isArray(a.requires_guest_fields)
+        ? a.requires_guest_fields
+        : typeof a.requires_guest_fields === "string"
+          ? (JSON.parse(a.requires_guest_fields) as string[])
+          : [],
     })),
     hostRulesMd: s.host_rules ?? undefined,
     cancellationPolicy: s.policy_name
