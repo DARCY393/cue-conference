@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   Elements,
@@ -48,6 +48,14 @@ function normalizeTime(value: string): string {
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
+
+/** Half-hour slots 07:00–18:00 (Cue bookable window). */
+const TIME_OPTIONS: string[] = Array.from({ length: 23 }, (_, i) => {
+  const minutes = 7 * 60 + i * 30;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+});
 
 function PaymentConfirmPanel({
   onSuccess,
@@ -179,8 +187,8 @@ export default function CueDallasPage() {
     if (windowIso && space) void refreshQuote();
   }, [windowIso, space, parking, refreshQuote]);
 
-  async function submitBooking(e: FormEvent) {
-    e.preventDefault();
+  async function submitBooking(e?: FormEvent | MouseEvent) {
+    e?.preventDefault();
     if (!space || !windowIso) return;
     if (!date) {
       setError("Pick a date.");
@@ -218,8 +226,12 @@ export default function CueDallasPage() {
           guest: { name: guestName, email: guestEmail, phone: guestPhone || undefined },
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Booking failed");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          data.message || data.error || `Booking failed (HTTP ${res.status})`
+        );
+      }
       setResult({
         bookingId: data.booking.id,
         clientSecret: data.stripe.clientSecret,
@@ -319,7 +331,6 @@ export default function CueDallasPage() {
             <span className="text-slate-600">Date</span>
             <input
               type="date"
-              required
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
@@ -328,25 +339,31 @@ export default function CueDallasPage() {
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-sm">
               <span className="text-slate-600">Start</span>
-              <input
-                type="time"
-                step={1800}
-                required
+              <select
                 value={startTime}
-                onChange={(e) => setStartTime(normalizeTime(e.target.value))}
+                onChange={(e) => setStartTime(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-              />
+              >
+                {TIME_OPTIONS.map((t) => (
+                  <option key={`s-${t}`} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="block text-sm">
               <span className="text-slate-600">End</span>
-              <input
-                type="time"
-                step={1800}
-                required
+              <select
                 value={endTime}
-                onChange={(e) => setEndTime(normalizeTime(e.target.value))}
+                onChange={(e) => setEndTime(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
-              />
+              >
+                {TIME_OPTIONS.map((t) => (
+                  <option key={`e-${t}`} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
           {space.addons[0] && (
@@ -388,7 +405,6 @@ export default function CueDallasPage() {
           <label className="block text-sm">
             <span className="text-slate-600">Your name</span>
             <input
-              required
               value={guestName}
               onChange={(e) => setGuestName(e.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
@@ -400,7 +416,6 @@ export default function CueDallasPage() {
               type="text"
               inputMode="email"
               autoComplete="email"
-              required
               value={guestEmail}
               onChange={(e) => setGuestEmail(e.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
@@ -488,7 +503,8 @@ export default function CueDallasPage() {
             </div>
           ) : (
             <button
-              type="submit"
+              type="button"
+              onClick={(e) => void submitBooking(e)}
               disabled={submitting || !quote}
               className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
