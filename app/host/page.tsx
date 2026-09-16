@@ -120,9 +120,9 @@ export default function HostPage() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Host queue</h1>
-          <p className="text-sm text-slate-500">
-            Authenticate with <code className="rounded bg-slate-100 px-1">HOST_EMAIL</code>{" "}
+          <h1 className="text-3xl text-cue-navy">Host inbox</h1>
+          <p className="mt-1 text-sm font-light text-cue-muted">
+            Authenticate with <code className="rounded bg-cue-wash px-1.5 py-0.5 text-cue-navy">HOST_EMAIL</code>{" "}
             bearer token (default host@example.com).
           </p>
         </div>
@@ -131,13 +131,13 @@ export default function HostPage() {
           <input
             value={hostEmail}
             onChange={(e) => setHostEmail(e.target.value)}
-            className="ml-2 rounded-lg border border-slate-200 px-3 py-2"
+            className="cue-input ml-2 !mt-0 w-auto min-w-[14rem]"
           />
         </label>
       </div>
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-xl border border-danger/30 bg-red-50 px-4 py-3 text-sm text-danger">
           {error}
         </div>
       )}
@@ -148,10 +148,10 @@ export default function HostPage() {
             key={s || "all"}
             type="button"
             onClick={() => setStatusFilter(s)}
-            className={`rounded-full px-3 py-1 text-sm ${
+            className={`rounded-full px-3 py-1.5 text-sm font-light capitalize ${
               statusFilter === s
-                ? "bg-blue-600 text-white"
-                : "bg-slate-100 text-slate-700"
+                ? "bg-cue-navy text-white"
+                : "bg-cue-wash text-cue-muted hover:bg-cue-navy/10"
             }`}
           >
             {s || "all"}
@@ -160,26 +160,26 @@ export default function HostPage() {
       </div>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-medium">Bookings</h2>
+        <h2 className="text-2xl text-cue-navy">Bookings</h2>
         {bookings.length === 0 && (
-          <p className="text-sm text-slate-500">No bookings in this filter.</p>
+          <p className="text-sm font-light text-cue-muted">No bookings in this filter.</p>
         )}
         {bookings.map((b) => (
           <div
             key={b.id}
-            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+            className="cue-card p-5"
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <div className="font-medium text-slate-900">
+                <div className="font-bold text-cue-navy">
                   {new Date(b.startsAt).toLocaleString()} →{" "}
                   {new Date(b.endsAt).toLocaleString()}
                 </div>
-                <div className="text-sm text-slate-500">
+                <div className="text-sm font-light text-cue-muted">
                   {b.guestName || b.guestEmail || b.guestId} · {b.status} ·{" "}
                   {money(b.totalCents)}
                 </div>
-                <div className="mt-1 break-all text-xs text-slate-400">{b.id}</div>
+                <div className="mt-1 break-all text-xs font-light text-cue-muted/80">{b.id}</div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {b.status === "requested" && (
@@ -187,14 +187,14 @@ export default function HostPage() {
                     <button
                       type="button"
                       onClick={() => act(`/api/v1/host/bookings/${b.id}/accept`)}
-                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm text-white"
+                      className="rounded-full bg-cue-green px-4 py-1.5 text-sm font-bold text-cue-navy"
                     >
                       Accept
                     </button>
                     <button
                       type="button"
                       onClick={() => act(`/api/v1/host/bookings/${b.id}/decline`)}
-                      className="rounded-lg bg-slate-200 px-3 py-1.5 text-sm text-slate-800"
+                      className="btn-ghost !py-1.5 !px-4"
                     >
                       Decline
                     </button>
@@ -205,7 +205,7 @@ export default function HostPage() {
                     <select
                       value={overtimeMins}
                       onChange={(e) => setOvertimeMins(Number(e.target.value))}
-                      className="rounded-lg border border-slate-200 px-2 py-1 text-sm"
+                      className="cue-input !mt-0 !w-auto !py-1.5"
                     >
                       {[30, 60, 90, 120].map((m) => (
                         <option key={m} value={m}>
@@ -216,7 +216,7 @@ export default function HostPage() {
                     <button
                       type="button"
                       onClick={() => chargeOt(b.id)}
-                      className="rounded-lg bg-amber-500 px-3 py-1.5 text-sm text-white"
+                      className="rounded-full bg-cue-gold px-4 py-1.5 text-sm font-bold text-cue-ink"
                     >
                       Charge OT
                     </button>
@@ -229,10 +229,10 @@ export default function HostPage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-medium">Blockouts</h2>
+        <h2 className="text-2xl text-cue-navy">Blockouts</h2>
         <form
           onSubmit={createBlockout}
-          className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-4"
+          className="cue-card grid gap-3 p-5 md:grid-cols-4"
         >
           <label className="text-sm md:col-span-1">
             Starts
@@ -241,7 +241,7 @@ export default function HostPage() {
               required
               value={boStart}
               onChange={(e) => setBoStart(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              className="cue-input"
             />
           </label>
           <label className="text-sm md:col-span-1">
@@ -251,7 +251,7 @@ export default function HostPage() {
               required
               value={boEnd}
               onChange={(e) => setBoEnd(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              className="cue-input"
             />
           </label>
           <label className="text-sm md:col-span-1">
@@ -259,13 +259,13 @@ export default function HostPage() {
             <input
               value={boReason}
               onChange={(e) => setBoReason(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              className="cue-input"
             />
           </label>
           <div className="flex items-end">
             <button
               type="submit"
-              className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm text-white"
+              className="btn-primary w-full"
             >
               Add blockout
             </button>
@@ -274,7 +274,7 @@ export default function HostPage() {
         {blockouts.map((x) => (
           <div
             key={x.id}
-            className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm"
+            className="cue-card flex items-center justify-between px-4 py-3 text-sm font-light"
           >
             <div>
               {new Date(x.startsAt).toLocaleString()} →{" "}
@@ -284,7 +284,7 @@ export default function HostPage() {
             <button
               type="button"
               onClick={() => removeBlockout(x.id)}
-              className="text-red-600 hover:underline"
+              className="text-danger hover:underline"
             >
               Remove
             </button>

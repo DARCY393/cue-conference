@@ -4,6 +4,17 @@ Single-space **Request-to-book** conference room (Cue · Dallas · `cue-dallas`)
 
 Built with **Next.js App Router**, TypeScript, Tailwind, Postgres migrations, and Stripe PaymentIntents (`capture_method=manual`).
 
+## Branding
+
+UI chrome matches [thecue.work](https://thecue.work): navy (`#002e5b`), green (`#2ed47d`), gold (`#f7c02e`), Brown body + Domaine headings, and the Cue light logo in the header.
+
+- Tokens / `@font-face`: `app/globals.css` (`cue-navy`, `cue-green`, `cue-gold`, `cue-ink`, `cue-muted`, `cue-wash`)
+- Fonts: `public/fonts/` (Brown `.woff`, Domaine `.ttf` from Cue WP uploads)
+- Logo / favicon: `public/branding/cue-logo.png`, `public/branding/favicon-192.jpg`
+- Shared chrome: `app/layout.tsx` (header → thecue.work, footer contact)
+
+Visual-only restyle — booking logic, Stripe Payment Element, and validation are unchanged.
+
 ## Product defaults
 
 | Setting | Value |

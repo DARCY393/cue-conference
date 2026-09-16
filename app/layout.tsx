@@ -5,6 +5,9 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "Cue — Conference Room Booking",
   description: "Request-to-book conference room in Dallas",
+  icons: {
+    icon: "/branding/favicon-192.jpg",
+  },
 };
 
 export default function RootLayout({
@@ -12,25 +15,58 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className="min-h-screen antialiased">
-        <header className="border-b border-slate-200 bg-white">
-          <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
-            <Link href="/" className="text-lg font-semibold tracking-tight text-slate-900">
-              Cue
-            </Link>
-            <nav className="flex gap-4 text-sm text-slate-600">
-              <Link href="/spaces/cue-dallas" className="hover:text-blue-600">
+      <body className="min-h-screen antialiased text-cue-ink">
+        <header className="border-b border-white/10 bg-cue-navy text-white">
+          <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4">
+            <a
+              href="https://thecue.work"
+              className="inline-flex items-center gap-3 text-white hover:text-white/90"
+              aria-label="Cue — thecue.work"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/branding/cue-logo.png"
+                alt="Cue"
+                className="h-8 w-auto"
+              />
+            </a>
+            <nav className="flex items-center gap-5 text-sm font-light text-white/90">
+              <Link href="/spaces/cue-dallas" className="text-white/90 hover:text-white">
                 Book space
               </Link>
-              <Link href="/host" className="hover:text-blue-600">
+              <Link href="/host" className="text-white/90 hover:text-white">
                 Host
               </Link>
+              <a
+                href="https://thecue.work"
+                className="hidden text-white/70 hover:text-white sm:inline"
+              >
+                thecue.work
+              </a>
             </nav>
           </div>
         </header>
-        <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
-        <footer className="mx-auto max-w-5xl px-4 pb-10 text-center text-xs text-slate-400">
-          Cue MVP — Request to book · America/Chicago
+        <main className="mx-auto max-w-5xl px-4 py-10">{children}</main>
+        <footer className="border-t border-cue-navy/10 bg-white">
+          <div className="mx-auto flex max-w-5xl flex-col items-center gap-2 px-4 py-8 text-center text-sm text-cue-muted sm:flex-row sm:justify-between sm:text-left">
+            <div>
+              <p className="font-display text-base text-cue-navy">Cue</p>
+              <p className="mt-1 font-light">Dallas coworking &amp; conference rooms</p>
+            </div>
+            <div className="space-y-1 font-light">
+              <p>
+                <a href="mailto:hello@thecue.work" className="hover:text-cue-navy">
+                  hello@thecue.work
+                </a>
+              </p>
+              <p>
+                <a href="tel:+12143934833" className="hover:text-cue-navy">
+                  (214) 393-4833
+                </a>
+              </p>
+              <p>Dallas, TX</p>
+            </div>
+          </div>
         </footer>
       </body>
     </html>
