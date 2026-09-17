@@ -11,6 +11,7 @@ psql "$DATABASE_URL" -f migrations/005_bookings.sql
 psql "$DATABASE_URL" -f migrations/006_payments_and_messages.sql
 psql "$DATABASE_URL" -f migrations/007_helpers.sql
 psql "$DATABASE_URL" -f migrations/008_seed_cue.sql   # optional
+psql "$DATABASE_URL" -f migrations/009_locations.sql  # locations + room 2
 ```
 
 Or:
@@ -30,3 +31,15 @@ for f in migrations/*.sql; do psql "$DATABASE_URL" -f "$f"; done
 - Money is integer cents
 - Half-open ranges `[starts_at, ends_at)` so back-to-back bookings are allowed
 - Host accept must re-check availability inside a transaction before Stripe capture
+
+## Applying 009 on an existing DB
+
+`009_locations.sql` is idempotent (`IF NOT EXISTS` / `ON CONFLICT`). Preferred:
+
+```bash
+npm run db:migrate          # skips 001–008 after bootstrap; applies 009
+# or
+npm run db:migrate:009
+# or
+psql "$DATABASE_URL" -f migrations/009_locations.sql
+```

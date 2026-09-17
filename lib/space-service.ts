@@ -1,49 +1,41 @@
-import { CUE_SPACE, IDS } from "./seed";
+import { CUE_SPACE, CUE_SPACES, CUE_LOCATIONS, IDS } from "./seed";
 import { getStore, isDemoMode } from "./store";
 import { query } from "./db";
-import type { BusyInterval, SpacePublic } from "./types";
+import type { BusyInterval, LocationPublic, SpacePublic } from "./types";
 import { FLEXIBLE_RULES } from "./seed";
 
-export async function getSpaceBySlug(slug: string): Promise<SpacePublic | null> {
-  if (isDemoMode()) return getStore().getSpaceBySlug(slug);
+type SpaceRow = {
+  id: string;
+  slug: string;
+  title: string;
+  subtitle: string | null;
+  description: string | null;
+  city: string;
+  neighborhood: string | null;
+  timezone: string;
+  capacity: number;
+  status: string;
+  min_hours: string;
+  base_hourly_cents: number;
+  overtime_multiplier: string;
+  long_booking_threshold_hours: string;
+  long_booking_discount_bps: number;
+  cleaning_included: boolean;
+  approx_lat: number | null;
+  approx_lng: number | null;
+  host_name: string;
+  policy_name: string | null;
+  rules_json: unknown;
+  host_rules: string | null;
+  location_id: string | null;
+  loc_slug: string | null;
+  loc_name: string | null;
+  loc_city: string | null;
+  loc_neighborhood: string | null;
+  loc_address_public: string | null;
+};
 
-  const { rows } = await query<{
-    id: string;
-    slug: string;
-    title: string;
-    subtitle: string | null;
-    description: string | null;
-    city: string;
-    neighborhood: string | null;
-    timezone: string;
-    capacity: number;
-    status: string;
-    min_hours: string;
-    base_hourly_cents: number;
-    overtime_multiplier: string;
-    long_booking_threshold_hours: string;
-    long_booking_discount_bps: number;
-    cleaning_included: boolean;
-    approx_lat: number | null;
-    approx_lng: number | null;
-    host_name: string;
-    policy_name: string | null;
-    rules_json: unknown;
-    host_rules: string | null;
-  }>(
-    `SELECT s.*, u.name AS host_name, cp.name AS policy_name, cp.rules_json,
-            hr.body_md AS host_rules
-     FROM spaces s
-     JOIN users u ON u.id = s.host_id
-     LEFT JOIN space_cancellation_policies scp ON scp.space_id = s.id
-     LEFT JOIN cancellation_policies cp ON cp.id = scp.cancellation_policy_id
-     LEFT JOIN host_rules hr ON hr.space_id = s.id
-     WHERE s.slug = $1 AND s.status = 'live'`,
-    [slug]
-  );
-  if (!rows[0]) return null;
-  const s = rows[0];
-
+async function hydrateSpace(s: SpaceRow): Promise<SpacePublic> {
   const [hours, amenities, addons, photos] = await Promise.all([
     query<{ weekday: number; start_minute: number; end_minute: number }>(
       `SELECT weekday, start_minute, end_minute FROM bookable_hours WHERE space_id = $1`,
@@ -71,6 +63,18 @@ export async function getSpaceBySlug(slug: string): Promise<SpacePublic | null> 
       [s.id]
     ),
   ]);
+
+  const location: LocationPublic | undefined =
+    s.location_id && s.loc_slug && s.loc_name && s.loc_city
+      ? {
+          id: s.location_id,
+          slug: s.loc_slug,
+          name: s.loc_name,
+          city: s.loc_city,
+          neighborhood: s.loc_neighborhood ?? undefined,
+          addressPublic: s.loc_address_public ?? undefined,
+        }
+      : undefined;
 
   return {
     id: s.id,
@@ -120,7 +124,7 @@ export async function getSpaceBySlug(slug: string): Promise<SpacePublic | null> 
     cancellationPolicy: s.policy_name
       ? {
           name: s.policy_name,
-          rules: (s.rules_json as SpacePublic["cancellationPolicy"])!.rules,
+          rules: (s.rules_json as import("./types").FlexibleRules) ?? FLEXIBLE_RULES,
         }
       : { name: "Flexible", rules: FLEXIBLE_RULES },
     approxLocation:
@@ -128,18 +132,118 @@ export async function getSpaceBySlug(slug: string): Promise<SpacePublic | null> 
         ? { lat: s.approx_lat, lng: s.approx_lng }
         : undefined,
     host: { name: s.host_name },
+    location,
+    locationId: s.location_id ?? undefined,
   };
+}
+
+const SPACE_SELECT = `
+  SELECT s.*, u.name AS host_name, cp.name AS policy_name, cp.rules_json,
+         hr.body_md AS host_rules,
+         l.slug AS loc_slug, l.name AS loc_name, l.city AS loc_city,
+         l.neighborhood AS loc_neighborhood, l.address_public AS loc_address_public
+  FROM spaces s
+  JOIN users u ON u.id = s.host_id
+  LEFT JOIN locations l ON l.id = s.location_id
+  LEFT JOIN space_cancellation_policies scp ON scp.space_id = s.id
+  LEFT JOIN cancellation_policies cp ON cp.id = scp.cancellation_policy_id
+  LEFT JOIN host_rules hr ON hr.space_id = s.id
+`;
+
+export async function getSpaceBySlug(slug: string): Promise<SpacePublic | null> {
+  if (isDemoMode()) return getStore().getSpaceBySlug(slug);
+
+  const { rows } = await query<SpaceRow>(
+    `${SPACE_SELECT} WHERE s.slug = $1 AND s.status = 'live'`,
+    [slug]
+  );
+  if (!rows[0]) return null;
+  return hydrateSpace(rows[0]);
 }
 
 export async function getSpaceById(id: string): Promise<SpacePublic | null> {
   if (isDemoMode()) return getStore().getSpaceById(id);
-  // Reuse slug path via id lookup
   const { rows } = await query<{ slug: string }>(
     `SELECT slug FROM spaces WHERE id = $1`,
     [id]
   );
   if (!rows[0]) return null;
   return getSpaceBySlug(rows[0].slug);
+}
+
+export async function listSpaces(): Promise<SpacePublic[]> {
+  if (isDemoMode()) return getStore().listSpaces();
+
+  const { rows } = await query<SpaceRow>(
+    `${SPACE_SELECT}
+     WHERE s.status = 'live'
+     ORDER BY COALESCE(l.sort_order, 0), l.name NULLS LAST, s.title`
+  );
+  const out: SpacePublic[] = [];
+  for (const row of rows) {
+    out.push(await hydrateSpace(row));
+  }
+  return out;
+}
+
+export async function listLocationsWithSpaces(): Promise<
+  { location: LocationPublic; spaces: SpacePublic[] }[]
+> {
+  const spaces = await listSpaces();
+  if (isDemoMode()) {
+    return CUE_LOCATIONS.map((loc) => ({
+      location: loc,
+      spaces: spaces.filter((s) => s.location?.id === loc.id),
+    }));
+  }
+
+  const { rows } = await query<{
+    id: string;
+    slug: string;
+    name: string;
+    city: string;
+    neighborhood: string | null;
+    address_public: string | null;
+    sort_order: number;
+  }>(
+    `SELECT id, slug, name, city, neighborhood, address_public, sort_order
+     FROM locations ORDER BY sort_order, name`
+  );
+
+  const byLoc = new Map<string, SpacePublic[]>();
+  for (const s of spaces) {
+    const key = s.location?.id ?? "_none";
+    if (!byLoc.has(key)) byLoc.set(key, []);
+    byLoc.get(key)!.push(s);
+  }
+
+  const groups: { location: LocationPublic; spaces: SpacePublic[] }[] = rows.map(
+    (r) => ({
+      location: {
+        id: r.id,
+        slug: r.slug,
+        name: r.name,
+        city: r.city,
+        neighborhood: r.neighborhood ?? undefined,
+        addressPublic: r.address_public ?? undefined,
+      },
+      spaces: byLoc.get(r.id) ?? [],
+    })
+  );
+
+  const orphans = byLoc.get("_none");
+  if (orphans?.length) {
+    groups.push({
+      location: {
+        id: "_none",
+        slug: "unassigned",
+        name: "Other spaces",
+        city: orphans[0].city,
+      },
+      spaces: orphans,
+    });
+  }
+  return groups;
 }
 
 export async function getBusy(
@@ -181,4 +285,4 @@ export async function getBusy(
   ];
 }
 
-export { CUE_SPACE, IDS };
+export { CUE_SPACE, CUE_SPACES, CUE_LOCATIONS, IDS };

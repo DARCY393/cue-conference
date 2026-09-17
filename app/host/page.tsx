@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Booking, Blockout } from "@/lib/types";
-import { IDS } from "@/lib/seed";
+import type { Booking, Blockout, SpacePublic } from "@/lib/types";
 
 function money(cents: number) {
   return new Intl.NumberFormat("en-US", {
@@ -21,6 +20,8 @@ export default function HostPage() {
   const [boEnd, setBoEnd] = useState("");
   const [boReason, setBoReason] = useState("");
   const [overtimeMins, setOvertimeMins] = useState(30);
+  const [spaces, setSpaces] = useState<SpacePublic[]>([]);
+  const [blockoutSpaceId, setBlockoutSpaceId] = useState("");
 
   const headers = useCallback(
     () => ({
@@ -30,26 +31,43 @@ export default function HostPage() {
     [hostEmail]
   );
 
+  useEffect(() => {
+    fetch("/api/v1/spaces")
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.message || "Failed to load spaces");
+        const liveSpaces: SpacePublic[] = data.data ?? [];
+        setSpaces(liveSpaces);
+        setBlockoutSpaceId((prev) => prev || liveSpaces[0]?.id || "");
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Load failed"));
+  }, []);
+
   const load = useCallback(async () => {
     setError(null);
     try {
+      const spaceId = blockoutSpaceId;
       const q = statusFilter ? `?status=${statusFilter}` : "";
       const [bRes, xRes] = await Promise.all([
         fetch(`/api/v1/host/bookings${q}`, { headers: headers() }),
-        fetch(`/api/v1/host/blockouts?spaceId=${IDS.space}`, {
-          headers: headers(),
-        }),
+        spaceId
+          ? fetch(`/api/v1/host/blockouts?spaceId=${spaceId}`, {
+              headers: headers(),
+            })
+          : Promise.resolve(null),
       ]);
       const bData = await bRes.json();
-      const xData = await xRes.json();
       if (!bRes.ok) throw new Error(bData.message || "Failed to load bookings");
-      if (!xRes.ok) throw new Error(xData.message || "Failed to load blockouts");
       setBookings(bData.data);
-      setBlockouts(xData.data);
+      if (xRes) {
+        const xData = await xRes.json();
+        if (!xRes.ok) throw new Error(xData.message || "Failed to load blockouts");
+        setBlockouts(xData.data);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     }
-  }, [headers, statusFilter]);
+  }, [headers, statusFilter, blockoutSpaceId]);
 
   useEffect(() => {
     void load();
@@ -72,7 +90,7 @@ export default function HostPage() {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({
-        spaceId: IDS.space,
+        spaceId: blockoutSpaceId || spaces[0]?.id,
         startsAt: new Date(boStart).toISOString(),
         endsAt: new Date(boEnd).toISOString(),
         reason: boReason || undefined,
@@ -175,6 +193,10 @@ export default function HostPage() {
                   {new Date(b.startsAt).toLocaleString()} →{" "}
                   {new Date(b.endsAt).toLocaleString()}
                 </div>
+                <div className="text-sm font-medium text-cue-navy">
+                  {b.spaceTitle || "Space"}
+                  {b.locationName ? ` · ${b.locationName}` : ""}
+                </div>
                 <div className="text-sm font-light text-cue-muted">
                   {b.guestName || b.guestEmail || b.guestId} · {b.status} ·{" "}
                   {money(b.totalCents)}
@@ -232,8 +254,23 @@ export default function HostPage() {
         <h2 className="text-2xl text-cue-navy">Blockouts</h2>
         <form
           onSubmit={createBlockout}
-          className="cue-card grid gap-3 p-5 md:grid-cols-4"
+          className="cue-card grid gap-3 p-5 md:grid-cols-5"
         >
+          <label className="text-sm md:col-span-1">
+            Space
+            <select
+              value={blockoutSpaceId}
+              onChange={(e) => setBlockoutSpaceId(e.target.value)}
+              className="cue-input"
+            >
+              {spaces.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title}
+                  {s.location?.name ? ` · ${s.location.name}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="text-sm md:col-span-1">
             Starts
             <input

@@ -8,7 +8,9 @@ import {
   useElements,
   useStripe,
 } from "@stripe/react-stripe-js";
+import { useParams } from "next/navigation";
 import type { Quote, SpacePublic } from "@/lib/types";
+import HouseRules from "@/components/HouseRules";
 
 function money(cents: number) {
   return new Intl.NumberFormat("en-US", {
@@ -117,7 +119,9 @@ function PaymentConfirmPanel({
   );
 }
 
-export default function CueDallasPage() {
+export default function SpacePage() {
+  const params = useParams();
+  const slug = typeof params.slug === "string" ? params.slug : "";
   const [space, setSpace] = useState<SpacePublic | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [date, setDate] = useState("");
@@ -139,14 +143,15 @@ export default function CueDallasPage() {
   const [paymentError, setPaymentError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/v1/spaces/cue-dallas")
+    if (!slug) return;
+    fetch(`/api/v1/spaces/${slug}`)
       .then(async (r) => {
         if (!r.ok) throw new Error((await r.json()).message || "Failed to load");
         return r.json();
       })
       .then(setSpace)
       .catch((e) => setError(e.message));
-  }, []);
+  }, [slug]);
 
   const windowIso = useMemo(() => {
     if (!date || !space) return null;
@@ -247,7 +252,7 @@ export default function CueDallasPage() {
     return <p className="font-light text-danger">{error}</p>;
   }
   if (!space) {
-    return <p className="font-light text-cue-muted">Loading Cue…</p>;
+    return <p className="font-light text-cue-muted">Loading space…</p>;
   }
 
   return (
@@ -276,7 +281,9 @@ export default function CueDallasPage() {
             <p className="text-sm font-light leading-relaxed text-cue-muted">{space.description}</p>
             <div className="flex flex-wrap gap-2">
               <span className="cue-chip">
-                {space.city} · {space.neighborhood}
+                {space.location
+                  ? `${space.location.city} · ${space.location.name}`
+                  : `${space.city}${space.neighborhood ? ` · ${space.neighborhood}` : ""}`}
               </span>
               <span className="cue-chip">
                 Capacity {space.capacity}
@@ -302,12 +309,7 @@ export default function CueDallasPage() {
               </ul>
             </div>
             {space.hostRulesMd && (
-              <div>
-                <h2 className="mb-2 text-sm font-bold text-cue-navy">House rules</h2>
-                <pre className="whitespace-pre-wrap rounded-lg bg-cue-wash p-3 text-xs font-light text-cue-muted">
-                  {space.hostRulesMd.trim()}
-                </pre>
-              </div>
+              <HouseRules markdown={space.hostRulesMd} />
             )}
             {space.cancellationPolicy && (
               <p className="text-xs font-light text-cue-muted">
