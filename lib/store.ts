@@ -1,10 +1,10 @@
 import { randomUUID } from "crypto";
-import { CUE_SPACE, HOST_EMAIL_DEFAULT, IDS } from "./seed";
+import { CUE_SPACES, HOST_EMAIL_DEFAULT, IDS } from "./seed";
 import type { Booking, Blockout, BusyInterval, SpacePublic } from "./types";
 
 /** Process-wide in-memory demo store (used when DATABASE_URL is absent). */
 class MemoryStore {
-  space: SpacePublic = structuredClone(CUE_SPACE);
+  spaces: SpacePublic[] = CUE_SPACES.map((s) => structuredClone(s));
   hostEmail = process.env.HOST_EMAIL || HOST_EMAIL_DEFAULT;
   bookings: Booking[] = [];
   blockouts: Blockout[] = [];
@@ -18,17 +18,28 @@ class MemoryStore {
     idempotencyKey?: string;
   }[] = [];
 
+  /** @deprecated use spaces[0] — kept for older call sites */
+  get space(): SpacePublic {
+    return this.spaces[0];
+  }
+
+  listSpaces(): SpacePublic[] {
+    return this.spaces
+      .filter((s) => s.status === "live")
+      .map((s) => this.toPublic(s));
+  }
+
   getSpaceBySlug(slug: string): SpacePublic | null {
-    if (this.space.slug === slug && this.space.status !== "draft") {
-      return this.toPublic(this.space);
-    }
-    return null;
+    const space = this.spaces.find(
+      (s) => s.slug === slug && s.status !== "draft"
+    );
+    return space ? this.toPublic(space) : null;
   }
 
   /** Full space including private fields (internal). */
   getSpaceById(id: string): SpacePublic | null {
-    if (this.space.id === id) return structuredClone(this.space);
-    return null;
+    const space = this.spaces.find((s) => s.id === id);
+    return space ? structuredClone(space) : null;
   }
 
   toPublic(space: SpacePublic): SpacePublic {
@@ -37,6 +48,10 @@ class MemoryStore {
     delete copy.hostId;
     delete copy.cancellationPolicyId;
     return copy;
+  }
+
+  hostSpaceIds(): Set<string> {
+    return new Set(this.spaces.map((s) => s.id));
   }
 
   getBusy(spaceId: string): BusyInterval[] {
@@ -77,6 +92,12 @@ class MemoryStore {
   }
 
   createBooking(booking: Booking): Booking {
+    const space = this.getSpaceById(booking.spaceId);
+    if (space) {
+      booking.spaceTitle = space.title;
+      booking.locationName = space.location?.name;
+      booking.spaceSlug = space.slug;
+    }
     this.bookings.push(booking);
     return booking;
   }
@@ -97,8 +118,9 @@ class MemoryStore {
     from?: string;
     to?: string;
   }): Booking[] {
+    const ids = this.hostSpaceIds();
     return this.bookings.filter((b) => {
-      if (b.spaceId !== IDS.space) return false;
+      if (!ids.has(b.spaceId)) return false;
       if (opts.status && b.status !== opts.status) return false;
       if (opts.from && b.endsAt <= opts.from) return false;
       if (opts.to && b.startsAt >= opts.to) return false;
@@ -153,3 +175,5 @@ export function getStore(): MemoryStore {
 export function isDemoMode(): boolean {
   return !process.env.DATABASE_URL;
 }
+
+export { IDS };

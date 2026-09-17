@@ -20,6 +20,11 @@ const HOST_ACTION_HOURS = 24;
 
 function toBookingPublic(b: Booking, space?: SpacePublic | null): Booking {
   const out = { ...b };
+  if (space) {
+    out.spaceTitle = space.title;
+    out.locationName = space.location?.name;
+    out.spaceSlug = space.slug;
+  }
   if (
     space?.addressPrivate &&
     ["accepted", "in_progress", "completed"].includes(b.status)
@@ -481,21 +486,24 @@ export async function listHostBookings(opts: {
   if (isDemoMode()) {
     return getStore().listHostBookings(opts);
   }
-  const params: unknown[] = [IDS.space];
-  let sql = `SELECT * FROM bookings WHERE space_id = $1`;
+  // All spaces for the seeded host (multi-location ready)
+  const params: unknown[] = [IDS.host];
+  let sql = `SELECT b.id FROM bookings b
+    JOIN spaces s ON s.id = b.space_id
+    WHERE s.host_id = $1`;
   if (opts.status) {
     params.push(opts.status);
-    sql += ` AND status = $${params.length}`;
+    sql += ` AND b.status = $${params.length}`;
   }
   if (opts.from) {
     params.push(opts.from);
-    sql += ` AND ends_at > $${params.length}`;
+    sql += ` AND b.ends_at > $${params.length}`;
   }
   if (opts.to) {
     params.push(opts.to);
-    sql += ` AND starts_at < $${params.length}`;
+    sql += ` AND b.starts_at < $${params.length}`;
   }
-  sql += ` ORDER BY starts_at ASC`;
+  sql += ` ORDER BY b.starts_at ASC`;
   const { rows } = await query(sql, params);
   const out: Booking[] = [];
   for (const r of rows) {

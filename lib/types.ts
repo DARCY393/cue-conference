@@ -45,6 +45,15 @@ export interface AddonPublic {
   requiresGuestFields?: string[];
 }
 
+export interface LocationPublic {
+  id: string;
+  slug: string;
+  name: string;
+  city: string;
+  neighborhood?: string;
+  addressPublic?: string;
+}
+
 export interface SpacePublic {
   id: string;
   slug: string;
@@ -69,6 +78,8 @@ export interface SpacePublic {
   addressPrivate?: string;
   hostId?: string;
   cancellationPolicyId?: string;
+  location?: LocationPublic;
+  locationId?: string;
 }
 
 export interface QuoteAddonInput {
@@ -131,6 +142,9 @@ export interface Booking {
   guestEmail?: string;
   guestName?: string;
   quoteJson?: Quote;
+  spaceTitle?: string;
+  locationName?: string;
+  spaceSlug?: string;
 }
 
 export interface Blockout {
