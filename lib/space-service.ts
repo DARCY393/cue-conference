@@ -9,6 +9,7 @@ type SpaceRow = {
   id: string;
   slug: string;
   title: string;
+  short_title: string | null;
   subtitle: string | null;
   description: string | null;
   city: string;
@@ -38,6 +39,11 @@ type SpaceRow = {
   google_calendar_id: string | null;
   google_busy_calendar_ids: string[] | null;
 };
+
+/** Fallback for rows with no short_title: use the title's first word (e.g. "M2 Meeting Room" -> "M2"). */
+function deriveShortTitle(title: string): string {
+  return title.split(" ")[0] || title;
+}
 
 async function hydrateSpace(s: SpaceRow): Promise<SpacePublic> {
   const [hours, amenities, addons, photos] = await Promise.all([
@@ -85,6 +91,7 @@ async function hydrateSpace(s: SpaceRow): Promise<SpacePublic> {
     id: s.id,
     slug: s.slug,
     title: s.title,
+    shortTitle: s.short_title ?? deriveShortTitle(s.title),
     subtitle: s.subtitle ?? undefined,
     description: s.description ?? undefined,
     city: s.city,

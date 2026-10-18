@@ -103,6 +103,14 @@ interface MockInterval {
   endsAt: string;
 }
 
+/** GOOGLE_CALENDAR_MOCK_BUSY accepts either {startsAt,endsAt} or {start,end} per interval. */
+interface MockIntervalRaw {
+  startsAt?: string;
+  endsAt?: string;
+  start?: string;
+  end?: string;
+}
+
 interface MockEvent {
   id: string;
   calendarId: string;
@@ -123,9 +131,15 @@ function seedMockBusyFromEnv(): void {
   const raw = process.env.GOOGLE_CALENDAR_MOCK_BUSY;
   if (!raw) return;
   try {
-    const parsed = JSON.parse(raw) as Record<string, MockInterval[]>;
+    const parsed = JSON.parse(raw) as Record<string, MockIntervalRaw[]>;
     for (const [calendarId, intervals] of Object.entries(parsed)) {
-      mockBusyStore.set(calendarId, intervals);
+      mockBusyStore.set(
+        calendarId,
+        intervals.map((i) => ({
+          startsAt: i.startsAt ?? i.start!,
+          endsAt: i.endsAt ?? i.end!,
+        }))
+      );
     }
   } catch (err) {
     console.error("[google-calendar] failed to parse GOOGLE_CALENDAR_MOCK_BUSY", err);

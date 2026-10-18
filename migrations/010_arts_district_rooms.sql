@@ -26,6 +26,10 @@ ALTER TABLE spaces
   ADD COLUMN IF NOT EXISTS google_calendar_id text,
   ADD COLUMN IF NOT EXISTS google_busy_calendar_ids text[] NOT NULL DEFAULT '{}';
 
+-- 2b. Short room label (e.g. "M1") used in quote line items; title stays "M1 Meeting Room".
+ALTER TABLE spaces
+  ADD COLUMN IF NOT EXISTS short_title text;
+
 ALTER TABLE bookings
   ADD COLUMN IF NOT EXISTS google_event_id text;
 
@@ -33,6 +37,7 @@ ALTER TABLE bookings
 UPDATE spaces SET
   slug = 'arts-district-m1',
   title = 'M1 Meeting Room',
+  short_title = 'M1',
   subtitle = '10 seats · Cue Arts District',
   description = 'Meeting room for presentations, team meetings, and workshops.',
   capacity = 10,
@@ -51,6 +56,7 @@ WHERE id = 'c0000000-0000-4000-8000-000000000001';
 UPDATE spaces SET
   slug = 'arts-district-m2',
   title = 'M2 Meeting Room',
+  short_title = 'M2',
   subtitle = '20 seats · Cue Arts District',
   description = 'Meeting room for presentations, team meetings, and workshops.',
   capacity = 20,
@@ -67,7 +73,7 @@ WHERE id = 'c0000000-0000-4000-8000-000000000002';
 
 -- 5. M3 — new room
 INSERT INTO spaces (
-  id, host_id, slug, title, subtitle, description,
+  id, host_id, slug, title, short_title, subtitle, description,
   city, neighborhood, timezone, capacity, status,
   min_hours, base_hourly_cents, overtime_multiplier,
   long_booking_threshold_hours, long_booking_discount_bps,
@@ -79,6 +85,7 @@ SELECT
   s.host_id,
   'arts-district-m3',
   'M3 Meeting Room',
+  'M3',
   '5 seats · Cue Arts District',
   'Meeting room for presentations, team meetings, and workshops.',
   s.city,
@@ -101,6 +108,7 @@ WHERE s.id = 'c0000000-0000-4000-8000-000000000001'
 ON CONFLICT (id) DO UPDATE SET
   slug = EXCLUDED.slug,
   title = EXCLUDED.title,
+  short_title = EXCLUDED.short_title,
   subtitle = EXCLUDED.subtitle,
   description = EXCLUDED.description,
   capacity = EXCLUDED.capacity,
@@ -116,7 +124,7 @@ ON CONFLICT (id) DO UPDATE SET
 
 -- 6. M4 — new room
 INSERT INTO spaces (
-  id, host_id, slug, title, subtitle, description,
+  id, host_id, slug, title, short_title, subtitle, description,
   city, neighborhood, timezone, capacity, status,
   min_hours, base_hourly_cents, overtime_multiplier,
   long_booking_threshold_hours, long_booking_discount_bps,
@@ -128,6 +136,7 @@ SELECT
   s.host_id,
   'arts-district-m4',
   'M4 Meeting Room',
+  'M4',
   '10 seats · Cue Arts District',
   'Meeting room for presentations, team meetings, and workshops.',
   s.city,
@@ -150,6 +159,7 @@ WHERE s.id = 'c0000000-0000-4000-8000-000000000001'
 ON CONFLICT (id) DO UPDATE SET
   slug = EXCLUDED.slug,
   title = EXCLUDED.title,
+  short_title = EXCLUDED.short_title,
   subtitle = EXCLUDED.subtitle,
   description = EXCLUDED.description,
   capacity = EXCLUDED.capacity,
