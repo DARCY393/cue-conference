@@ -170,6 +170,11 @@ export function getStore(): MemoryStore {
   return globalForStore.__cueStore;
 }
 
+/** Test helper: discard all in-memory bookings/blockouts/guests and reseed spaces. */
+export function resetStore(): void {
+  globalForStore.__cueStore = new MemoryStore();
+}
+
 export function isDemoMode(): boolean {
   return !process.env.DATABASE_URL;
 }

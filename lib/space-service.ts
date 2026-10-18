@@ -35,6 +35,8 @@ type SpaceRow = {
   loc_neighborhood: string | null;
   loc_address_public: string | null;
   loc_timezone: string | null;
+  google_calendar_id: string | null;
+  google_busy_calendar_ids: string[] | null;
 };
 
 async function hydrateSpace(s: SpaceRow): Promise<SpacePublic> {
@@ -137,6 +139,8 @@ async function hydrateSpace(s: SpaceRow): Promise<SpacePublic> {
     host: { name: s.host_name },
     location,
     locationId: s.location_id ?? undefined,
+    googleCalendarId: s.google_calendar_id ?? undefined,
+    googleBusyCalendarIds: s.google_busy_calendar_ids ?? [],
   };
 }
 
@@ -154,6 +158,7 @@ const SPACE_SELECT = `
   LEFT JOIN host_rules hr ON hr.space_id = s.id
 `;
 
+/** Public lookup — calendar sync internals are stripped (see toPublicSpaceJson). */
 export async function getSpaceBySlug(slug: string): Promise<SpacePublic | null> {
   if (isDemoMode()) return getStore().getSpaceBySlug(slug);
 
@@ -161,7 +166,7 @@ export async function getSpaceBySlug(slug: string): Promise<SpacePublic | null> 
     `${SPACE_SELECT} WHERE s.slug = $1 AND s.status = 'live'`,
     [slug]
   );
-  if (rows[0]) return hydrateSpace(rows[0]);
+  if (rows[0]) return toPublicSpaceJson(await hydrateSpace(rows[0]));
 
   const canonical = resolveLegacySpaceSlug(slug);
   if (canonical !== slug) {
@@ -169,21 +174,20 @@ export async function getSpaceBySlug(slug: string): Promise<SpacePublic | null> 
       `${SPACE_SELECT} WHERE s.slug = $1 AND s.status = 'live'`,
       [canonical]
     );
-    if (legacyRows[0]) return hydrateSpace(legacyRows[0]);
+    if (legacyRows[0]) return toPublicSpaceJson(await hydrateSpace(legacyRows[0]));
   }
   return null;
 }
 
+/** Private/internal lookup — includes calendar sync fields; never serialize directly to a public response. */
 export async function getSpaceById(id: string): Promise<SpacePublic | null> {
   if (isDemoMode()) return getStore().getSpaceById(id);
-  const { rows } = await query<{ slug: string }>(
-    `SELECT slug FROM spaces WHERE id = $1`,
-    [id]
-  );
+  const { rows } = await query<SpaceRow>(`${SPACE_SELECT} WHERE s.id = $1`, [id]);
   if (!rows[0]) return null;
-  return getSpaceBySlug(rows[0].slug);
+  return hydrateSpace(rows[0]);
 }
 
+/** Public listing — calendar sync internals are stripped (see toPublicSpaceJson). */
 export async function listSpaces(): Promise<SpacePublic[]> {
   if (isDemoMode()) return getStore().listSpaces();
 
@@ -194,7 +198,7 @@ export async function listSpaces(): Promise<SpacePublic[]> {
   );
   const out: SpacePublic[] = [];
   for (const row of rows) {
-    out.push(await hydrateSpace(row));
+    out.push(toPublicSpaceJson(await hydrateSpace(row)));
   }
   return out;
 }

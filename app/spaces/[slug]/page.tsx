@@ -394,9 +394,6 @@ export default function SpacePage() {
               </select>
             </label>
           </div>
-          <p className="text-xs font-light text-cue-muted">
-            {minHours}-hour minimum
-          </p>
           {space.addons[0] && (
             <label className="flex items-start gap-2 text-sm">
               <input

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getBusy, getSpaceById, getSpaceBySlug } from "@/lib/space-service";
+import { getGoogleBusy } from "@/lib/google-calendar";
 import { jsonError, jsonOk } from "@/lib/http";
 
 const UUID_RE =
@@ -9,7 +10,11 @@ async function resolveSpace(key: string) {
   if (UUID_RE.test(key)) {
     return (await getSpaceById(key)) || (await getSpaceBySlug(key));
   }
-  return getSpaceBySlug(key);
+  // Re-fetch by id so internal calendar fields (stripped from the slug/public
+  // lookup) are available for the Google busy merge below.
+  const bySlug = await getSpaceBySlug(key);
+  if (!bySlug) return null;
+  return (await getSpaceById(bySlug.id)) || bySlug;
 }
 
 export async function GET(
@@ -30,9 +35,13 @@ export async function GET(
   const space = await resolveSpace(key);
   if (!space) return jsonError(404, "not_found", "Space not found");
   const busy = await getBusy(space.id, fromDate, toDate);
+  const googleBusy = await getGoogleBusy(space, fromDate, toDate);
+  if (!googleBusy.ok) {
+    return jsonError(409, googleBusy.error, googleBusy.message);
+  }
   return jsonOk({
     spaceId: space.id,
     timezone: space.timezone,
-    busy,
+    busy: [...busy, ...googleBusy.busy],
   });
 }

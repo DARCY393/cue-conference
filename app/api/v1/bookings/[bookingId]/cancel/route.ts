@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { cancelBooking } from "@/lib/bookings";
+import { cancelBooking, sanitizeBookingForApi } from "@/lib/bookings";
 import { jsonError, jsonOk } from "@/lib/http";
 
 export async function POST(
@@ -18,5 +18,5 @@ export async function POST(
   if ("error" in result) {
     return jsonError(result.status, result.error, result.message);
   }
-  return jsonOk(result);
+  return jsonOk({ ...result, booking: sanitizeBookingForApi(result.booking) });
 }

@@ -13,6 +13,7 @@ import {
   createOvertimePaymentIntent,
 } from "./stripe";
 import { getEmailSender } from "./email";
+import { getGoogleBusy, createGoogleBookingEvent, deleteGoogleBookingEvent } from "./google-calendar";
 import type { Booking, QuoteAddonInput, SpacePublic } from "./types";
 import { IDS } from "./seed";
 
@@ -32,6 +33,13 @@ function toBookingPublic(b: Booking, space?: SpacePublic | null): Booking {
     out.accessDetails = space.addressPrivate;
   }
   return out;
+}
+
+/** Strip internal calendar-sync fields before a booking is serialized to any API response. */
+export function sanitizeBookingForApi(b: Booking): Booking {
+  const copy = { ...b };
+  delete copy.googleEventId;
+  return copy;
 }
 
 export type ApiErr = { ok: false; error: string; message: string; status: number };
@@ -56,7 +64,16 @@ export async function createQuoteForSpace(
     };
   }
   const busy = await getBusy(spaceId, startsAt, endsAt);
-  const available = isAvailable(startsAt, endsAt, busy);
+  const googleBusy = await getGoogleBusy(space, startsAt, endsAt);
+  if (!googleBusy.ok) {
+    return {
+      ok: false,
+      error: googleBusy.error,
+      message: googleBusy.message,
+      status: 409,
+    };
+  }
+  const available = isAvailable(startsAt, endsAt, [...busy, ...googleBusy.busy]);
   if (!available) {
     return {
       ok: false,
@@ -73,6 +90,7 @@ export async function createQuoteForSpace(
       addonsCatalog: space.addons,
       addonSelections: addons,
       available: true,
+      roomLabel: space.shortTitle,
     });
     return { ok: true, quote, space };
   } catch (e) {
@@ -85,6 +103,13 @@ export async function createQuoteForSpace(
   }
 }
 
+export type CreateBookingResult =
+  | { error: string; message: string; status: number }
+  | {
+      booking: Booking;
+      stripe: Awaited<ReturnType<typeof createManualCapturePaymentIntent>>;
+    };
+
 export async function createBookingRequest(body: {
   spaceId: string;
   startsAt: string;
@@ -93,7 +118,7 @@ export async function createBookingRequest(body: {
   guestNotes?: string;
   activityDescription?: string;
   guest: { name: string; email: string; phone?: string };
-}) {
+}): Promise<CreateBookingResult> {
   const startsAt = new Date(body.startsAt);
   const endsAt = new Date(body.endsAt);
   const quoted = await createQuoteForSpace(
@@ -296,6 +321,7 @@ export async function getBookingById(id: string): Promise<Booking | null> {
       ? new Date(r.completed_at as string).toISOString()
       : undefined,
     stripePaymentIntentId: (r.stripe_payment_intent_id as string) ?? undefined,
+    googleEventId: (r.google_event_id as string) ?? undefined,
     createdAt: new Date(r.created_at as string).toISOString(),
   };
   return toBookingPublic(booking, space);
@@ -347,6 +373,9 @@ export async function cancelBooking(
       [id, cancelledAt]
     );
   }
+  if (booking.googleEventId) {
+    await deleteGoogleBookingEvent(space, booking.googleEventId);
+  }
   const updated = (await getBookingById(id))!;
   await getEmailSender().send({
     to: booking.guestEmail || "guest@example.com",
@@ -365,6 +394,7 @@ export async function acceptBooking(id: string) {
   }
   const startsAt = new Date(booking.startsAt);
   const endsAt = new Date(booking.endsAt);
+  const space = await getSpaceById(booking.spaceId);
   const busy = await getBusy(booking.spaceId, startsAt, endsAt);
   // exclude self
   const others = busy.filter(
@@ -375,7 +405,15 @@ export async function acceptBooking(id: string) {
         b.endsAt === booking.endsAt
       )
   );
-  if (!isAvailable(startsAt, endsAt, others)) {
+  let allBusy = others;
+  if (space) {
+    const googleBusy = await getGoogleBusy(space, startsAt, endsAt);
+    if (!googleBusy.ok) {
+      return { error: googleBusy.error, message: googleBusy.message, status: 409 };
+    }
+    allBusy = [...others, ...googleBusy.busy];
+  }
+  if (!isAvailable(startsAt, endsAt, allBusy)) {
     return {
       error: "slot_unavailable" as const,
       message: "Slot conflict on re-check",
@@ -386,12 +424,28 @@ export async function acceptBooking(id: string) {
     await capturePaymentIntent(booking.stripePaymentIntentId);
   }
   const decidedAt = new Date().toISOString();
+  let googleEventId: string | undefined;
+  let calendarSyncWarning: string | undefined;
+  if (space) {
+    const eventResult = await createGoogleBookingEvent(space, {
+      id: booking.id,
+      startsAt: booking.startsAt,
+      endsAt: booking.endsAt,
+      guestName: booking.guestName,
+    });
+    if (eventResult.ok) {
+      googleEventId = eventResult.eventId;
+    } else {
+      calendarSyncWarning = eventResult.message || "Failed to sync booking to Google Calendar";
+      console.error(`[google-calendar] accept(${id}): ${calendarSyncWarning}`);
+    }
+  }
   if (isDemoMode()) {
-    getStore().updateBooking(id, { status: "accepted", decidedAt });
+    getStore().updateBooking(id, { status: "accepted", decidedAt, googleEventId });
   } else {
     await query(
-      `UPDATE bookings SET status = 'accepted', decided_at = $2 WHERE id = $1`,
-      [id, decidedAt]
+      `UPDATE bookings SET status = 'accepted', decided_at = $2, google_event_id = $3 WHERE id = $1`,
+      [id, decidedAt, googleEventId ?? null]
     );
   }
   const updated = (await getBookingById(id))!;
@@ -401,7 +455,7 @@ export async function acceptBooking(id: string) {
     subject: "Your booking was accepted",
     payload: { bookingId: id },
   });
-  return { booking: updated };
+  return { booking: updated, calendarSyncWarning };
 }
 
 export async function declineBooking(id: string, reason?: string) {
@@ -422,6 +476,10 @@ export async function declineBooking(id: string, reason?: string) {
       `UPDATE bookings SET status = 'declined', decided_at = $2 WHERE id = $1`,
       [id, decidedAt]
     );
+  }
+  if (booking.googleEventId) {
+    const space = await getSpaceById(booking.spaceId);
+    await deleteGoogleBookingEvent(space, booking.googleEventId);
   }
   const updated = (await getBookingById(id))!;
   await getEmailSender().send({

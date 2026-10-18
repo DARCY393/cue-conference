@@ -16,6 +16,8 @@ export interface QuoteInput {
   taxCents?: number;
   /** Override feature flags (tests / legacy fixtures); defaults to FEATURES. */
   features?: QuoteFeatureFlags;
+  /** Short room label for the space line item, e.g. "M2". Defaults to "Meeting room". */
+  roomLabel?: string;
 }
 
 function hoursBetween(startsAt: Date, endsAt: Date): number {
@@ -92,12 +94,8 @@ export function calculateQuote(input: QuoteInput): Quote {
     throw new Error("endsAt must be after startsAt");
   }
   if (hours < pricing.minHours) {
-    const minCostDollars = (pricing.minHours * pricing.baseHourlyCents) / 100;
-    const rateDollars = pricing.baseHourlyCents / 100;
     const hourWord = pricing.minHours === 1 ? "hour" : "hours";
-    throw new Error(
-      `Minimum booking is ${pricing.minHours} ${hourWord} ($${minCostDollars.toFixed(2)} at $${rateDollars}/hr).`
-    );
+    throw new Error(`Minimum booking is ${pricing.minHours} ${hourWord}.`);
   }
 
   const baseCents = Math.round(hours * pricing.baseHourlyCents);
@@ -123,10 +121,11 @@ export function calculateQuote(input: QuoteInput): Quote {
   const taxCents = input.taxCents ?? 0;
   const totalCents = baseCents - discountCents + addonsCents + feesCents + taxCents;
 
+  const roomLabel = input.roomLabel ?? "Meeting room";
   const lineItems: QuoteLineItem[] = [
     {
       code: "space",
-      label: `Conference room (${hours}h × $${(pricing.baseHourlyCents / 100).toFixed(2)})`,
+      label: `${roomLabel} · ${hours}h × $${(pricing.baseHourlyCents / 100).toFixed(2)}`,
       amountCents: baseCents,
     },
   ];

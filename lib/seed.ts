@@ -75,11 +75,11 @@ const SHARED_HOURS = [1, 2, 3, 4, 5].map((weekday) => ({
   endMinute: 18 * 60,
 }));
 
-/** Default non-member hourly rate; configurable per room via pricing.baseHourlyCents. */
+/** Default hourly rate for new rooms; configurable per room via pricing.baseHourlyCents. */
 export const DEFAULT_HOURLY_CENTS = 7000;
 
-/** Minimum booking length, in hours, for all rooms. */
-export const DEFAULT_MIN_HOURS = 3;
+/** Default minimum booking length, in hours; configurable per room via pricing.minHours. */
+export const DEFAULT_MIN_HOURS = 1;
 
 const ROOM_PRICING: SpacePricing = {
   currency: "usd",
@@ -127,6 +127,8 @@ function makeRoom(opts: {
   slug: string;
   shortTitle: string;
   capacity: number;
+  baseHourlyCents: number;
+  minHours?: number;
   googleCalendarId: string;
   googleBusyCalendarIds?: string[];
   parkingAddonId: string;
@@ -143,7 +145,11 @@ function makeRoom(opts: {
     timezone: "America/Chicago",
     capacity: opts.capacity,
     status: "live",
-    pricing: { ...ROOM_PRICING },
+    pricing: {
+      ...ROOM_PRICING,
+      baseHourlyCents: opts.baseHourlyCents,
+      minHours: opts.minHours ?? DEFAULT_MIN_HOURS,
+    },
     bookableHours: SHARED_HOURS,
     photos: [{ ...ROOM_PHOTO }],
     amenities: SHARED_AMENITIES,
@@ -167,6 +173,7 @@ export const CUE_M1: SpacePublic = makeRoom({
   slug: "arts-district-m1",
   shortTitle: "M1",
   capacity: 10,
+  baseHourlyCents: 7000,
   googleCalendarId:
     "c_e88039667398de2f9dd4f5b5c52147b034323e48620c7cb4c278eefcdc0601a6@group.calendar.google.com",
   parkingAddonId: IDS.parkingM1,
@@ -177,6 +184,7 @@ export const CUE_M2: SpacePublic = makeRoom({
   slug: "arts-district-m2",
   shortTitle: "M2",
   capacity: 20,
+  baseHourlyCents: 12500,
   googleCalendarId:
     "c_8b3363b1a13418a42df25d270780f453fa4f4e2de9be4b5d85bc3119ea23ff3a@group.calendar.google.com",
   // Extra calendar checked for busy only (named "M2 - SPP" in Google Calendar).
@@ -191,6 +199,7 @@ export const CUE_M3: SpacePublic = makeRoom({
   slug: "arts-district-m3",
   shortTitle: "M3",
   capacity: 5,
+  baseHourlyCents: 3500,
   googleCalendarId:
     "c_fa24824eeb56172234a4e332185b1590926da705c57c76d6d99d3a164f696ba6@group.calendar.google.com",
   parkingAddonId: "d0000000-0000-4000-8000-000000000003",
@@ -201,6 +210,7 @@ export const CUE_M4: SpacePublic = makeRoom({
   slug: "arts-district-m4",
   shortTitle: "M4",
   capacity: 10,
+  baseHourlyCents: 7000,
   googleCalendarId:
     "c_44bb9580defceabfbb00be84aee1b13223c607efffc9051673f813a5e03a6152@group.calendar.google.com",
   parkingAddonId: "d0000000-0000-4000-8000-000000000004",

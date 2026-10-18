@@ -5,6 +5,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["__tests__/**/*.test.ts"],
+    env: {
+      GOOGLE_CALENDAR_MODE: "mock",
+    },
   },
   resolve: {
     alias: {

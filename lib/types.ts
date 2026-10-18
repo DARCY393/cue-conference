@@ -165,5 +165,5 @@ export interface Blockout {
 export interface BusyInterval {
   startsAt: string;
   endsAt: string;
-  kind: "booking" | "blockout";
+  kind: "booking" | "blockout" | "google";
 }

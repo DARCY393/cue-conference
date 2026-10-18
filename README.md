@@ -23,8 +23,8 @@ Visual-only restyle — booking logic, Stripe Payment Element, and validation ar
 | Rooms | `arts-district-m1` (M1, 10 seats), `arts-district-m2` (M2, 20 seats), `arts-district-m3` (M3, 5 seats), `arts-district-m4` (M4, 10 seats) |
 | Address (public) | 750 N. St. Paul Street, Dallas, TX 75201 |
 | Timezone | `America/Chicago` |
-| Rate | \$70/hr (7000¢) per room, configurable per room (`DEFAULT_HOURLY_CENTS` in `lib/seed.ts`) |
-| Minimum | 3 hours — enforced server-side (quote + booking APIs) and in the guest UI |
+| Rate | M1 \$70/hr, M2 \$125/hr, M3 \$35/hr, M4 \$70/hr — per room (`baseHourlyCents` in `lib/seed.ts`; `DEFAULT_HOURLY_CENTS` is the default for new rooms) |
+| Minimum | 1 hour per room (`minHours` in `lib/seed.ts`) — enforced server-side (quote + booking APIs) |
 | Long booking discount | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
 | Overtime | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
 | Parking addon | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
@@ -59,8 +59,33 @@ via `getSpaceBySlug` (API): `cue-dallas` → `arts-district-m1`; `cue-downtown-b
 
 **Per-room Google Calendar columns** (`spaces.google_calendar_id`,
 `spaces.google_busy_calendar_ids`, `bookings.google_event_id`) were added in
-migration `010` for a later calendar-sync chunk. They are never included in
-public API responses (stripped by `lib/space-public.ts`'s `toPublicSpaceJson`).
+migration `010`. They are never included in public API responses (stripped by
+`lib/space-public.ts`'s `toPublicSpaceJson`, and `googleEventId` is stripped
+from every booking response by `lib/bookings.ts`'s `sanitizeBookingForApi`).
+See **Google Calendar sync** below.
+
+## Google Calendar sync
+
+Each room is backed by a Google **secondary calendar** (`c_…@group.calendar.google.com`,
+owned by `darcy@thecue.work`) — not a Calendar "resource". M2 also has a second,
+busy-only calendar ("M2 - SPP"). These calendars must be shared with whichever
+Google identity the app authenticates as, with **"Make changes to events"**
+permission, or live-mode freebusy/event calls will fail.
+
+Controlled by `GOOGLE_CALENDAR_MODE`:
+
+| Mode | Behavior |
+|------|----------|
+| `disabled` (default) | No busy lookups, no events created/deleted. Logs once at startup. |
+| `mock` | In-memory busy list + events, for local dev/tests. Seed busy via `GOOGLE_CALENDAR_MOCK_BUSY` (JSON) or `lib/google-calendar.ts`'s `setMockBusy()`. |
+| `live` | Real Calendar API v3 calls via `fetch`, authenticated with `google-auth-library` (service account or OAuth refresh token — see `.env.example`). |
+
+Behavior:
+
+- **Availability** (`GET /api/v1/spaces/{id}/availability`, quotes, booking creation, host accept re-check) merges each room's Google busy with DB/demo busy. Calendar IDs/event IDs are never included in the response — only `kind: "google"` busy windows.
+- **Fail closed**: if a live-mode freebusy call errors (API failure, or a calendar the credentials can't see), the slot is treated as unavailable and the request gets `409 calendar_unavailable` — "Room calendar unavailable; try again or contact hello@thecue.work". The error is logged server-side.
+- **On accept**: after the PaymentIntent is captured, an event is created on the room's calendar (`summary: "Cue booking — {guest} ({room})"`, a private `cueBookingId` extended property). If calendar sync fails, the booking still gets accepted — the accept response carries a `calendarSyncWarning` field for staff instead.
+- **On cancel/decline**: if the booking has a stored `google_event_id`, the event is deleted (404/410 ignored).
 
 ## Quick start (demo mode)
 
@@ -243,7 +268,7 @@ Without Stripe keys, bookings still work with mock `*_secret_mock` client secret
 | `npm run dev` | Next.js dev server |
 | `npm run build` | Production build (succeeds without DB/Stripe) |
 | `npm run lint` | ESLint |
-| `npm test` | Vitest — quote + Flexible refund math |
+| `npm test` | Vitest — quote, Flexible refund, pricing, payment hold, Google Calendar sync |
 | `npm run db:migrate` | Apply pending SQL migrations (schema_migrations) |
 | `npm run db:migrate:009` | One-shot apply `009_locations.sql` only |
 | `npm run db:migrate:010` | One-shot apply `010_arts_district_rooms.sql` only |
@@ -298,10 +323,11 @@ lib/
   store.ts              In-memory demo store
   bookings.ts           Booking lifecycle
   stripe.ts             Stripe (test-mode only) or mock PI
+  google-calendar.ts     Google Calendar sync (disabled/mock/live)
 docs/REMOVED_FEATURES.md  Restore steps for removed pricing features
 migrations/              Raw SQL (001–010)
 openapi.yaml
-__tests__/          quote + refund unit tests
+__tests__/          quote, refund, pricing, payment-hold, google-calendar unit tests
 ```
 
 ## Demo mode behavior

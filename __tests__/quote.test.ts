@@ -76,15 +76,15 @@ describe("calculateQuote", () => {
     expect(q.totalCents).toBe(16500);
   });
 
-  it("rejects below min hours with a minimum + price hint", () => {
+  it("rejects below min hours with a generic message (current 1h-minimum default)", () => {
     expect(() =>
       calculateQuote({
         startsAt: new Date("2026-09-14T14:00:00.000Z"),
-        endsAt: new Date("2026-09-14T16:30:00.000Z"),
+        endsAt: new Date("2026-09-14T14:30:00.000Z"),
         pricing,
         addonsCatalog: addons,
       })
-    ).toThrow(/Minimum booking is 3 hours \(\$210\.00 at \$70\/hr\)\./);
+    ).toThrow("Minimum booking is 1 hour.");
   });
 });
 
