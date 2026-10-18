@@ -23,6 +23,7 @@ function toBookingPublic(b: Booking, space?: SpacePublic | null): Booking {
   const out = { ...b };
   if (space) {
     out.spaceTitle = space.title;
+    out.spaceShortTitle = space.shortTitle;
     out.locationName = space.location?.name;
     out.spaceSlug = space.slug;
   }

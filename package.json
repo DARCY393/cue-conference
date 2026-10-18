@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:db": "vitest run __tests__/db.integration.test.ts",
     "db:migrate": "node scripts/migrate.mjs",
     "db:migrate:009": "node scripts/migrate-009.mjs",
     "db:migrate:010": "node scripts/migrate-010.mjs"

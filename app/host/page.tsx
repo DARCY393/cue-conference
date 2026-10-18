@@ -5,13 +5,7 @@ import type { Booking, Blockout, SpacePublic } from "@/lib/types";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { Button, buttonClasses } from "@/components/ui/Button";
-
-function money(cents: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(cents / 100);
-}
+import { formatMoney } from "@/lib/format";
 
 function formatChicago(iso: string): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -26,7 +20,7 @@ function formatChicago(iso: string): string {
 const STATUS_FILTERS = ["requested", "accepted", "declined", "cancelled", ""] as const;
 
 const HOLD_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
-  requested: { label: "Hold authorized", tone: "warning" },
+  requested: { label: "Hold placed", tone: "warning" },
   accepted: { label: "Captured", tone: "success" },
   completed: { label: "Captured", tone: "success" },
   declined: { label: "Released", tone: "neutral" },
@@ -210,23 +204,27 @@ export default function HostPage() {
       <section data-testid="host-queue" className="space-y-3">
         <h2 className="text-2xl">Bookings</h2>
         {bookings.length === 0 && (
-          <p className="text-sm text-cue-stone-500">No bookings in this filter.</p>
+          <p className="text-sm text-cue-stone-500">
+            No bookings here yet — try a different tab, or check back once a guest requests a room.
+          </p>
         )}
         {bookings.map((b) => {
           const hold = holdStatus(b.status);
+          const code = b.spaceShortTitle || b.spaceSlug?.split("-").pop() || b.spaceTitle || "Room";
           return (
             <div key={b.id} className="cue-card p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1">
                   <div className="font-semibold text-cue-navy-600">
-                    {b.spaceTitle || "Room"}
+                    {code}
                     {b.locationName ? ` · ${b.locationName}` : ""}
                   </div>
                   <div className="text-sm text-cue-stone-700">
                     {formatChicago(b.startsAt)} – {formatChicago(b.endsAt)} CT
                   </div>
                   <div className="text-sm text-cue-stone-500">
-                    {b.guestName || b.guestEmail || b.guestId} · {money(b.totalCents)}
+                    {b.guestName || "Guest"}
+                    {b.guestEmail ? ` · ${b.guestEmail}` : ""} · {formatMoney(b.totalCents)}
                   </div>
                   <div className="flex items-center gap-2 pt-1">
                     <Badge tone="neutral">{b.status}</Badge>

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   Elements,
@@ -16,12 +16,39 @@ import { AmenityTile } from "@/components/ui/AmenityTile";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import { formatMoney, formatRate, roomCode } from "@/lib/format";
 
-function money(cents: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(cents / 100);
+const money = formatMoney;
+
+/** Next weekday (Mon–Fri) on or after today, read in America/Chicago, as a yyyy-mm-dd date-input value. */
+function nextWeekdayChicago(): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(new Date());
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  let date = new Date(Date.UTC(Number(get("year")), Number(get("month")) - 1, Number(get("day"))));
+  let weekday = get("weekday");
+  while (weekday === "Sat" || weekday === "Sun") {
+    date = new Date(date.getTime() + 24 * 60 * 60 * 1000);
+    weekday = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short" }).format(date);
+  }
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function RoomPlaceholder({ code, capacity }: { code: string; capacity: number }) {
+  return (
+    <div className="flex h-60 w-full flex-col items-center justify-center gap-1 bg-cue-stone-100">
+      <span className="font-display text-5xl text-cue-navy-600">{code}</span>
+      <span className="text-sm text-cue-stone-500">{capacity} seats</span>
+    </div>
+  );
 }
 
 const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
@@ -140,9 +167,10 @@ export default function SpacePage() {
   const slug = typeof params.slug === "string" ? params.slug : "";
   const [space, setSpace] = useState<SpacePublic | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [date, setDate] = useState("");
+  const [date, setDate] = useState(() => nextWeekdayChicago());
   const [startTime, setStartTime] = useState("09:00");
-  const [endTime, setEndTime] = useState("12:00");
+  const [endTime, setEndTime] = useState("11:00");
+  const [imgError, setImgError] = useState(false);
   const [parking, setParking] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
@@ -157,6 +185,7 @@ export default function SpacePage() {
   } | null>(null);
   const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const checkoutRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!slug) return;
@@ -165,9 +194,16 @@ export default function SpacePage() {
         if (!r.ok) throw new Error((await r.json()).message || "Failed to load");
         return r.json();
       })
-      .then(setSpace)
+      .then((s) => {
+        setImgError(false);
+        setSpace(s);
+      })
       .catch((e) => setError(e.message));
   }, [slug]);
+
+  useEffect(() => {
+    if (result) checkoutRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [result]);
 
   const minHours = space?.pricing.minHours ?? 1;
 
@@ -293,12 +329,17 @@ export default function SpacePage() {
     <div className="grid gap-8 lg:grid-cols-5">
       <section className="lg:col-span-3 space-y-6">
         <div className="cue-card overflow-hidden">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={space.photos[0]?.url}
-            alt={space.photos[0]?.alt || space.title}
-            className="h-60 w-full object-cover"
-          />
+          {space.photos[0]?.url && !imgError ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={space.photos[0].url}
+              alt={space.photos[0]?.alt || space.title}
+              className="h-60 w-full object-cover"
+              onError={() => setImgError(true)}
+            />
+          ) : (
+            <RoomPlaceholder code={roomCode(space)} capacity={space.capacity} />
+          )}
           <div className="space-y-5 p-6 sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -310,7 +351,7 @@ export default function SpacePage() {
               </div>
               <div className="shrink-0 rounded-tile bg-cue-navy-050 px-3 py-2 text-right">
                 <div className="text-lg font-semibold text-cue-navy-600">
-                  {money(space.pricing.baseHourlyCents)}
+                  {formatRate(space.pricing.baseHourlyCents)}
                 </div>
                 <div className="text-xs text-cue-stone-500">per hour</div>
               </div>
@@ -483,7 +524,7 @@ export default function SpacePage() {
           </label>
           {error && <Alert tone="danger">{error}</Alert>}
           {result ? (
-            <div data-testid="checkout" className="space-y-3">
+            <div ref={checkoutRef} data-testid="checkout" className="space-y-3">
               <Alert tone="success" title="Request created">
                 <p className="break-all">Booking: {result.bookingId}</p>
                 <p className="mt-2 text-xs opacity-80">

@@ -6,17 +6,7 @@ import { Users } from "lucide-react";
 import type { LocationPublic, SpacePublic } from "@/lib/types";
 import { buttonClasses } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
-
-function money(cents: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(cents / 100);
-}
-
-function roomCode(space: SpacePublic): string {
-  return space.shortTitle || space.slug.split("-").pop() || space.slug;
-}
+import { formatRate, roomCode } from "@/lib/format";
 
 type Group = { location: LocationPublic; spaces: SpacePublic[] };
 
@@ -78,12 +68,11 @@ export default function Home() {
                     </div>
                     <div className="shrink-0 text-right">
                       <div className="text-lg font-semibold text-cue-navy-600">
-                        {money(space.pricing.baseHourlyCents)}
+                        {formatRate(space.pricing.baseHourlyCents)}
                       </div>
-                      <div className="text-xs text-cue-stone-500">/ hr</div>
+                      <div className="text-xs text-cue-stone-500">/hr</div>
                     </div>
                   </div>
-                  <p className="text-sm text-cue-stone-700">{space.subtitle}</p>
                   <Link
                     href={`/spaces/${space.slug}`}
                     className={buttonClasses("secondary", "mt-auto self-start")}

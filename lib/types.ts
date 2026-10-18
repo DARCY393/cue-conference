@@ -150,6 +150,7 @@ export interface Booking {
   guestName?: string;
   quoteJson?: Quote;
   spaceTitle?: string;
+  spaceShortTitle?: string;
   locationName?: string;
   spaceSlug?: string;
 }
