@@ -9,8 +9,13 @@ import {
   useStripe,
 } from "@stripe/react-stripe-js";
 import { useParams } from "next/navigation";
+import { Clock, CreditCard, MapPin, Users } from "lucide-react";
 import type { Quote, SpacePublic } from "@/lib/types";
 import HouseRules from "@/components/HouseRules";
+import { AmenityTile } from "@/components/ui/AmenityTile";
+import { Badge } from "@/components/ui/Badge";
+import { Alert } from "@/components/ui/Alert";
+import { Button } from "@/components/ui/Button";
 
 function money(cents: number) {
   return new Intl.NumberFormat("en-US", {
@@ -21,6 +26,8 @@ function money(cents: number) {
 
 const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
 const stripePromise = publishableKey ? loadStripe(publishableKey) : null;
+/** Test or mock mode is the only supported mode today — live keys are refused server-side. */
+const isTestOrMockStripe = !publishableKey || publishableKey.startsWith("pk_test_");
 
 function isMockSecret(secret: string) {
   return secret.includes("_secret_mock");
@@ -115,14 +122,15 @@ function PaymentConfirmPanel({
   return (
     <div className="space-y-3">
       <PaymentElement />
-      <button
+      <Button
         type="button"
+        variant="accent"
+        fullWidth
         onClick={() => void handleConfirm()}
         disabled={!stripe || !elements || confirming}
-        className="btn-accent w-full disabled:opacity-50"
       >
-        {confirming ? "Confirming…" : "Confirm payment"}
-      </button>
+        {confirming ? "Confirming…" : "Confirm Payment"}
+      </Button>
     </div>
   );
 }
@@ -275,10 +283,10 @@ export default function SpacePage() {
   }
 
   if (error && !space) {
-    return <p className="font-light text-danger">{error}</p>;
+    return <Alert tone="danger">{error}</Alert>;
   }
   if (!space) {
-    return <p className="font-light text-cue-muted">Loading space…</p>;
+    return <p className="text-cue-stone-500">Loading space…</p>;
   }
 
   return (
@@ -291,56 +299,51 @@ export default function SpacePage() {
             alt={space.photos[0]?.alt || space.title}
             className="h-60 w-full object-cover"
           />
-          <div className="space-y-4 p-6 sm:p-8">
+          <div className="space-y-5 p-6 sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h1 className="text-3xl text-cue-navy">{space.title}</h1>
-                <p className="font-light text-cue-muted">{space.subtitle}</p>
+                <h1 className="text-3xl">{space.title}</h1>
+                <p className="mt-1 flex items-center gap-1.5 text-cue-stone-500">
+                  <Users aria-hidden className="h-4 w-4" />
+                  {space.capacity} seats · {space.location?.name ?? space.city}
+                </p>
               </div>
-              <div className="rounded-xl bg-cue-navy/5 px-3 py-2 text-right">
-                <div className="text-lg font-bold text-cue-navy">
+              <div className="shrink-0 rounded-tile bg-cue-navy-050 px-3 py-2 text-right">
+                <div className="text-lg font-semibold text-cue-navy-600">
                   {money(space.pricing.baseHourlyCents)}
                 </div>
-                <div className="text-xs font-light text-cue-navy-soft">per hour</div>
+                <div className="text-xs text-cue-stone-500">per hour</div>
               </div>
             </div>
-            <p className="text-sm font-light leading-relaxed text-cue-muted">{space.description}</p>
+            <p className="text-sm leading-relaxed text-cue-stone-700">{space.description}</p>
             <div className="flex flex-wrap gap-2">
               <span className="cue-chip">
+                <MapPin aria-hidden className="mr-1.5 h-3.5 w-3.5" />
                 {space.location
                   ? `${space.location.city} · ${space.location.name}`
                   : `${space.city}${space.neighborhood ? ` · ${space.neighborhood}` : ""}`}
               </span>
               <span className="cue-chip">
-                Capacity {space.capacity}
-              </span>
-              <span className="cue-chip">
+                <Clock aria-hidden className="mr-1.5 h-3.5 w-3.5" />
                 Mon–Fri 7:00–18:00 ({space.timezone})
               </span>
-              <span className="cue-chip">
-                Request to book
-              </span>
+              <Badge tone="navy">Request to book</Badge>
             </div>
-            <div>
-              <h2 className="mb-2 text-sm font-bold text-cue-navy">Amenities</h2>
-              <ul className="flex flex-wrap gap-2">
-                {space.amenities.map((a) => (
-                  <li
-                    key={a.key}
-                    className="rounded-md border border-cue-navy/10 px-2 py-1 text-xs font-light text-cue-muted"
-                  >
-                    {a.label}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            {space.hostRulesMd && (
-              <HouseRules markdown={space.hostRulesMd} />
+            {space.amenities.length > 0 && (
+              <div>
+                <h2 className="mb-3 text-sm font-semibold text-cue-navy-600">Amenities</h2>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {space.amenities.map((a) => (
+                    <AmenityTile key={a.key} amenityKey={a.key} label={a.label} />
+                  ))}
+                </div>
+              </div>
             )}
+            {space.hostRulesMd && <HouseRules markdown={space.hostRulesMd} />}
             {space.cancellationPolicy && (
-              <p className="text-xs font-light text-cue-muted">
-                Cancellation: <strong>{space.cancellationPolicy.name}</strong> — full
-                refund ≥7 days before; 50% ≥24h before; grace within 24h of confirm if
+              <p className="text-xs text-cue-stone-500">
+                Cancellation: <strong className="text-cue-stone-700">{space.cancellationPolicy.name}</strong> —
+                full refund ≥7 days before; 50% ≥24h before; grace within 24h of confirm if
                 start ≥48h away.
               </p>
             )}
@@ -352,25 +355,30 @@ export default function SpacePage() {
         <form
           noValidate
           onSubmit={submitBooking}
-          className="cue-card sticky top-6 space-y-4 p-6"
+          className="cue-card sticky top-[6.5rem] space-y-4 p-6"
         >
-          <h2 className="text-2xl text-cue-navy">Request a booking</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-2xl">Request a booking</h2>
+            {isTestOrMockStripe && <Badge tone="warning">Test mode</Badge>}
+          </div>
           <label className="block text-sm">
-            <span className="font-light text-cue-muted">Date</span>
+            <span className="text-cue-stone-500">Date</span>
             <input
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className="cue-input"
+              aria-label="Date"
             />
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-sm">
-              <span className="font-light text-cue-muted">Start</span>
+              <span className="text-cue-stone-500">Start</span>
               <select
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                className="cue-input"
+                className="cue-select"
+                aria-label="Start time"
               >
                 {TIME_OPTIONS.map((t) => (
                   <option key={`s-${t}`} value={t}>
@@ -380,11 +388,12 @@ export default function SpacePage() {
               </select>
             </label>
             <label className="block text-sm">
-              <span className="font-light text-cue-muted">End</span>
+              <span className="text-cue-stone-500">End</span>
               <select
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
-                className="cue-input"
+                className="cue-select"
+                aria-label="End time"
               >
                 {endTimeOptions.map((t) => (
                   <option key={`e-${t}`} value={t}>
@@ -403,35 +412,41 @@ export default function SpacePage() {
                 className="mt-1"
               />
               <span>
-                <span className="font-medium">{space.addons[0].name}</span>
-                <span className="block text-xs font-light text-cue-muted">
+                <span className="font-medium text-cue-ink">{space.addons[0].name}</span>
+                <span className="block text-xs text-cue-stone-500">
                   {money(space.addons[0].priceCents)}/day
                 </span>
               </span>
             </label>
           )}
-          <div className="rounded-xl bg-cue-wash p-3 text-sm">
-            {quoteError && <p className="text-danger">{quoteError}</p>}
+          <div
+            data-testid="quote-panel"
+            className="rounded-tile bg-cue-stone-100 p-3 text-sm"
+          >
+            {quoteError && <p className="text-cue-red-600">{quoteError}</p>}
             {quote && (
               <ul className="space-y-1">
                 {quote.lineItems.map((li) => (
-                  <li key={li.code} className="flex justify-between font-light text-cue-ink">
+                  <li key={li.code} className="flex justify-between text-cue-stone-700">
                     <span>{li.label}</span>
                     <span>{money(li.amountCents)}</span>
                   </li>
                 ))}
-                <li className="flex justify-between border-t border-cue-navy/10 pt-2 font-bold text-cue-navy">
+                <li
+                  data-testid="quote-total"
+                  className="flex justify-between border-t border-cue-stone-300 pt-2 font-semibold text-cue-navy-600"
+                >
                   <span>Total</span>
                   <span>{money(quote.totalCents)}</span>
                 </li>
               </ul>
             )}
             {!quote && !quoteError && (
-              <p className="font-light text-cue-muted">Select a date to see pricing</p>
+              <p className="text-cue-stone-500">Select a date to see pricing</p>
             )}
           </div>
           <label className="block text-sm">
-            <span className="font-light text-cue-muted">Your name</span>
+            <span className="text-cue-stone-500">Your name</span>
             <input
               value={guestName}
               onChange={(e) => setGuestName(e.target.value)}
@@ -439,7 +454,7 @@ export default function SpacePage() {
             />
           </label>
           <label className="block text-sm">
-            <span className="font-light text-cue-muted">Email</span>
+            <span className="text-cue-stone-500">Email</span>
             <input
               type="text"
               inputMode="email"
@@ -450,7 +465,7 @@ export default function SpacePage() {
             />
           </label>
           <label className="block text-sm">
-            <span className="font-light text-cue-muted">Phone (optional)</span>
+            <span className="text-cue-stone-500">Phone (optional)</span>
             <input
               value={guestPhone}
               onChange={(e) => setGuestPhone(e.target.value)}
@@ -458,7 +473,7 @@ export default function SpacePage() {
             />
           </label>
           <label className="block text-sm">
-            <span className="font-light text-cue-muted">Notes</span>
+            <span className="text-cue-stone-500">Notes</span>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -466,45 +481,45 @@ export default function SpacePage() {
               className="cue-input"
             />
           </label>
-          {error && <p className="text-sm text-danger">{error}</p>}
+          {error && <Alert tone="danger">{error}</Alert>}
           {result ? (
-            <div className="space-y-3">
-              <div className="rounded-xl border border-cue-green/40 bg-cue-green/10 p-3 text-sm text-cue-navy">
-                <p className="font-medium">Request created</p>
-                <p className="mt-1 break-all">Booking: {result.bookingId}</p>
-                <p className="mt-2 text-xs">
+            <div data-testid="checkout" className="space-y-3">
+              <Alert tone="success" title="Request created">
+                <p className="break-all">Booking: {result.bookingId}</p>
+                <p className="mt-2 text-xs opacity-80">
                   Payment uses manual capture — host accept will capture the hold.
                 </p>
-              </div>
+              </Alert>
 
               {isMockSecret(result.clientSecret) ? (
-                <div className="rounded-xl border border-cue-gold/50 bg-cue-gold/15 p-3 text-sm text-cue-ink">
-                  <p className="font-medium">Demo mode</p>
-                  <p className="mt-1 text-xs">
-                    Stripe keys are unset, so this booking used a mock PaymentIntent.
-                    Set <code className="font-mono">STRIPE_SECRET_KEY</code> and{" "}
-                    <code className="font-mono">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code>{" "}
-                    for real test-mode card collection.
+                <Alert
+                  tone="warning"
+                  title="Test mode — no Stripe keys configured"
+                  data-testid="stripe-test-alert"
+                >
+                  <p>
+                    A mock card hold of {quote ? money(quote.totalCents) : "the quoted amount"} was
+                    created; no card is charged. Set <code className="font-mono">STRIPE_SECRET_KEY</code>{" "}
+                    and <code className="font-mono">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code> for real
+                    test-mode card collection.
                   </p>
-                  <p className="mt-1 break-all text-xs opacity-70">
-                    {result.clientSecret}
-                  </p>
-                </div>
+                </Alert>
               ) : !stripePromise || !publishableKey ? (
-                <div className="rounded-xl border border-danger/30 bg-red-50 p-3 text-sm text-danger">
+                <Alert tone="danger">
                   Booking created, but{" "}
-                  <code className="font-mono">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code>{" "}
-                  is missing — cannot load Stripe Payment Element.
-                </div>
+                  <code className="font-mono">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code> is missing —
+                  cannot load Stripe Payment Element.
+                </Alert>
               ) : paymentMessage ? (
-                <div className="rounded-xl border border-cue-green/40 bg-cue-green/10 p-3 text-sm text-cue-navy">
-                  <p className="font-medium">Payment confirmed</p>
-                  <p className="mt-1">{paymentMessage}</p>
-                </div>
+                <Alert tone="success" title="Payment confirmed">
+                  {paymentMessage}
+                </Alert>
               ) : (
-                <div className="space-y-2 rounded-xl border border-cue-navy/10 p-3">
-                  <p className="text-sm font-bold text-cue-navy">
+                <div className="space-y-2 rounded-card border border-cue-stone-200 p-3">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-cue-navy-600">
+                    <CreditCard aria-hidden className="h-4 w-4" />
                     Enter payment details
+                    {isTestOrMockStripe && <Badge tone="warning">Test mode</Badge>}
                   </p>
                   <Elements
                     stripe={stripePromise}
@@ -523,21 +538,20 @@ export default function SpacePage() {
                       }}
                     />
                   </Elements>
-                  {paymentError && (
-                    <p className="text-sm text-danger">{paymentError}</p>
-                  )}
+                  {paymentError && <Alert tone="danger">{paymentError}</Alert>}
                 </div>
               )}
             </div>
           ) : (
-            <button
+            <Button
               type="button"
+              variant="accent"
+              fullWidth
               onClick={(e) => void submitBooking(e)}
               disabled={submitting || !quote}
-              className="btn-accent w-full disabled:opacity-50"
             >
-              {submitting ? "Submitting…" : "Request to book"}
-            </button>
+              {submitting ? "Submitting…" : "Request Booking"}
+            </Button>
           )}
         </form>
       </section>

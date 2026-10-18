@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Booking, Blockout, SpacePublic } from "@/lib/types";
+import { Badge, type BadgeTone } from "@/components/ui/Badge";
+import { Alert } from "@/components/ui/Alert";
+import { Button, buttonClasses } from "@/components/ui/Button";
 
 function money(cents: number) {
   return new Intl.NumberFormat("en-US", {
@@ -10,17 +13,47 @@ function money(cents: number) {
   }).format(cents / 100);
 }
 
+function formatChicago(iso: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
+const STATUS_FILTERS = ["requested", "accepted", "declined", "cancelled", ""] as const;
+
+const HOLD_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
+  requested: { label: "Hold authorized", tone: "warning" },
+  accepted: { label: "Captured", tone: "success" },
+  completed: { label: "Captured", tone: "success" },
+  declined: { label: "Released", tone: "neutral" },
+  cancelled: { label: "Released", tone: "neutral" },
+  expired: { label: "Released", tone: "neutral" },
+  draft: { label: "Not authorized", tone: "neutral" },
+  in_progress: { label: "Captured", tone: "success" },
+};
+
+function holdStatus(status: string): { label: string; tone: BadgeTone } {
+  return HOLD_STATUS[status] ?? { label: status, tone: "neutral" };
+}
+
 export default function HostPage() {
   const [hostEmail, setHostEmail] = useState("host@example.com");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [blockouts, setBlockouts] = useState<Blockout[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState("requested");
+  const [statusFilter, setStatusFilter] = useState<string>("requested");
   const [boStart, setBoStart] = useState("");
   const [boEnd, setBoEnd] = useState("");
   const [boReason, setBoReason] = useState("");
   const [spaces, setSpaces] = useState<SpacePublic[]>([]);
   const [blockoutSpaceId, setBlockoutSpaceId] = useState("");
+  const [calendarWarning, setCalendarWarning] = useState<{ bookingId: string; message: string } | null>(
+    null
+  );
 
   const headers = useCallback(
     () => ({
@@ -72,13 +105,21 @@ export default function HostPage() {
     void load();
   }, [load]);
 
-  async function act(path: string) {
+  async function act(bookingId: string, action: "accept" | "decline") {
     setError(null);
-    const res = await fetch(path, { method: "POST", headers: headers() });
+    const res = await fetch(`/api/v1/host/bookings/${bookingId}/${action}`, {
+      method: "POST",
+      headers: headers(),
+    });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setError(data.message || "Action failed");
       return;
+    }
+    if (data.calendarSyncWarning) {
+      setCalendarWarning({ bookingId, message: data.calendarSyncWarning });
+    } else {
+      setCalendarWarning(null);
     }
     await load();
   }
@@ -123,38 +164,42 @@ export default function HostPage() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl text-cue-navy">Host inbox</h1>
-          <p className="mt-1 text-sm font-light text-cue-muted">
-            Authenticate with <code className="rounded bg-cue-wash px-1.5 py-0.5 text-cue-navy">HOST_EMAIL</code>{" "}
+          <p className="cue-eyebrow">Staff</p>
+          <h1 className="mt-2 text-3xl">Host queue</h1>
+          <p className="mt-1 text-sm text-cue-stone-500">
+            Sign in with the <code className="rounded bg-cue-stone-100 px-1.5 py-0.5 text-cue-navy-600">HOST_EMAIL</code>{" "}
             bearer token (default host@example.com).
           </p>
         </div>
         <label className="text-sm">
-          Host email
+          <span className="text-cue-stone-500">Host email</span>
           <input
             value={hostEmail}
             onChange={(e) => setHostEmail(e.target.value)}
-            className="cue-input ml-2 !mt-0 w-auto min-w-[14rem]"
+            className="cue-input w-auto min-w-[14rem]"
+            aria-label="Host email"
           />
         </label>
       </div>
 
-      {error && (
-        <div className="rounded-xl border border-danger/30 bg-red-50 px-4 py-3 text-sm text-danger">
-          {error}
-        </div>
+      {error && <Alert tone="danger">{error}</Alert>}
+
+      {calendarWarning && (
+        <Alert tone="warning" title="Calendar sync warning" onDismiss={() => setCalendarWarning(null)}>
+          Booking {calendarWarning.bookingId}: {calendarWarning.message}
+        </Alert>
       )}
 
-      <div className="flex gap-2">
-        {["requested", "accepted", "declined", "cancelled", ""].map((s) => (
+      <div className="inline-flex gap-1 rounded-pill bg-cue-stone-100 p-1">
+        {STATUS_FILTERS.map((s) => (
           <button
             key={s || "all"}
             type="button"
             onClick={() => setStatusFilter(s)}
-            className={`rounded-full px-3 py-1.5 text-sm font-light capitalize ${
+            className={`rounded-pill px-3.5 py-1.5 text-sm font-medium capitalize transition-colors ${
               statusFilter === s
-                ? "bg-cue-navy text-white"
-                : "bg-cue-wash text-cue-muted hover:bg-cue-navy/10"
+                ? "bg-cue-navy-600 text-white"
+                : "text-cue-stone-500 hover:text-cue-navy-600"
             }`}
           >
             {s || "all"}
@@ -162,69 +207,70 @@ export default function HostPage() {
         ))}
       </div>
 
-      <section className="space-y-3">
-        <h2 className="text-2xl text-cue-navy">Bookings</h2>
+      <section data-testid="host-queue" className="space-y-3">
+        <h2 className="text-2xl">Bookings</h2>
         {bookings.length === 0 && (
-          <p className="text-sm font-light text-cue-muted">No bookings in this filter.</p>
+          <p className="text-sm text-cue-stone-500">No bookings in this filter.</p>
         )}
-        {bookings.map((b) => (
-          <div
-            key={b.id}
-            className="cue-card p-5"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="font-bold text-cue-navy">
-                  {new Date(b.startsAt).toLocaleString()} →{" "}
-                  {new Date(b.endsAt).toLocaleString()}
+        {bookings.map((b) => {
+          const hold = holdStatus(b.status);
+          return (
+            <div key={b.id} className="cue-card p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="font-semibold text-cue-navy-600">
+                    {b.spaceTitle || "Room"}
+                    {b.locationName ? ` · ${b.locationName}` : ""}
+                  </div>
+                  <div className="text-sm text-cue-stone-700">
+                    {formatChicago(b.startsAt)} – {formatChicago(b.endsAt)} CT
+                  </div>
+                  <div className="text-sm text-cue-stone-500">
+                    {b.guestName || b.guestEmail || b.guestId} · {money(b.totalCents)}
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <Badge tone="neutral">{b.status}</Badge>
+                    <Badge tone={hold.tone}>{hold.label}</Badge>
+                  </div>
+                  <div className="break-all text-xs text-cue-stone-400">{b.id}</div>
                 </div>
-                <div className="text-sm font-medium text-cue-navy">
-                  {b.spaceTitle || "Space"}
-                  {b.locationName ? ` · ${b.locationName}` : ""}
+                <div className="flex flex-wrap gap-2">
+                  {b.status === "requested" && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        data-testid={`accept-${b.id}`}
+                        onClick={() => act(b.id, "accept")}
+                      >
+                        Accept
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        data-testid={`decline-${b.id}`}
+                        onClick={() => act(b.id, "decline")}
+                      >
+                        Decline
+                      </Button>
+                    </>
+                  )}
                 </div>
-                <div className="text-sm font-light text-cue-muted">
-                  {b.guestName || b.guestEmail || b.guestId} · {b.status} ·{" "}
-                  {money(b.totalCents)}
-                </div>
-                <div className="mt-1 break-all text-xs font-light text-cue-muted/80">{b.id}</div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {b.status === "requested" && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => act(`/api/v1/host/bookings/${b.id}/accept`)}
-                      className="rounded-full bg-cue-green px-4 py-1.5 text-sm font-bold text-cue-navy"
-                    >
-                      Accept
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => act(`/api/v1/host/bookings/${b.id}/decline`)}
-                      className="btn-ghost !py-1.5 !px-4"
-                    >
-                      Decline
-                    </button>
-                  </>
-                )}
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-2xl text-cue-navy">Blockouts</h2>
-        <form
-          onSubmit={createBlockout}
-          className="cue-card grid gap-3 p-5 md:grid-cols-5"
-        >
+        <h2 className="text-2xl">Blockouts</h2>
+        <form onSubmit={createBlockout} className="cue-card grid gap-3 p-5 md:grid-cols-5">
           <label className="text-sm md:col-span-1">
-            Space
+            <span className="text-cue-stone-500">Space</span>
             <select
               value={blockoutSpaceId}
               onChange={(e) => setBlockoutSpaceId(e.target.value)}
-              className="cue-input"
+              className="cue-select"
             >
               {spaces.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -235,7 +281,7 @@ export default function HostPage() {
             </select>
           </label>
           <label className="text-sm md:col-span-1">
-            Starts
+            <span className="text-cue-stone-500">Starts</span>
             <input
               type="datetime-local"
               required
@@ -245,7 +291,7 @@ export default function HostPage() {
             />
           </label>
           <label className="text-sm md:col-span-1">
-            Ends
+            <span className="text-cue-stone-500">Ends</span>
             <input
               type="datetime-local"
               required
@@ -255,7 +301,7 @@ export default function HostPage() {
             />
           </label>
           <label className="text-sm md:col-span-1">
-            Reason
+            <span className="text-cue-stone-500">Reason</span>
             <input
               value={boReason}
               onChange={(e) => setBoReason(e.target.value)}
@@ -263,28 +309,21 @@ export default function HostPage() {
             />
           </label>
           <div className="flex items-end">
-            <button
-              type="submit"
-              className="btn-primary w-full"
-            >
-              Add blockout
-            </button>
+            <Button type="submit" variant="primary" fullWidth>
+              Add Blockout
+            </Button>
           </div>
         </form>
         {blockouts.map((x) => (
-          <div
-            key={x.id}
-            className="cue-card flex items-center justify-between px-4 py-3 text-sm font-light"
-          >
-            <div>
-              {new Date(x.startsAt).toLocaleString()} →{" "}
-              {new Date(x.endsAt).toLocaleString()}
+          <div key={x.id} className="cue-card flex items-center justify-between px-4 py-3 text-sm">
+            <div className="text-cue-stone-700">
+              {formatChicago(x.startsAt)} – {formatChicago(x.endsAt)} CT
               {x.reason ? ` · ${x.reason}` : ""}
             </div>
             <button
               type="button"
               onClick={() => removeBlockout(x.id)}
-              className="text-danger hover:underline"
+              className={buttonClasses("ghost", "px-3! py-1.5! text-cue-red-600 hover:bg-cue-red-100!")}
             >
               Remove
             </button>

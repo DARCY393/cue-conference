@@ -2,13 +2,20 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Users } from "lucide-react";
 import type { LocationPublic, SpacePublic } from "@/lib/types";
+import { buttonClasses } from "@/components/ui/Button";
+import { Alert } from "@/components/ui/Alert";
 
 function money(cents: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
   }).format(cents / 100);
+}
+
+function roomCode(space: SpacePublic): string {
+  return space.shortTitle || space.slug.split("-").pop() || space.slug;
 }
 
 type Group = { location: LocationPublic; spaces: SpacePublic[] };
@@ -28,88 +35,64 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="space-y-10">
-      <section className="space-y-4 pt-4">
-        <p className="text-sm font-light uppercase tracking-[0.12em] text-cue-muted">
-          Conference booking
+    <div className="space-y-12">
+      <section className="space-y-4">
+        <p className="cue-eyebrow">Conference booking</p>
+        <h1 className="max-w-2xl text-[clamp(30px,3.2vw,42px)]">Book a meeting room at Cue</h1>
+        <p className="max-w-xl text-lg text-cue-stone-700">
+          Request a room below, add your details, and we&apos;ll hold the time. Host
+          confirmation and a card hold finish the booking.
         </p>
-        <h1 className="max-w-2xl text-4xl leading-tight text-cue-navy sm:text-5xl">
-          Book a professional meeting room at Cue
-        </h1>
-        <p className="max-w-xl text-lg font-light text-cue-muted">
-          Request-to-book conference space across Cue locations — flexible hours,
-          parking add-ons, and host confirmation.
-        </p>
-        <div className="flex flex-wrap gap-3 pt-2">
-          <Link href="/host" className="btn-primary">
-            Host inbox
-          </Link>
-        </div>
       </section>
 
-      {error && (
-        <p className="rounded-xl border border-danger/30 bg-red-50 px-4 py-3 text-sm text-danger">
-          {error}
-        </p>
-      )}
+      {error && <Alert tone="danger">{error}</Alert>}
 
-      {!error && groups.length === 0 && (
-        <p className="font-light text-cue-muted">Loading locations…</p>
-      )}
+      {!error && groups.length === 0 && <p className="text-cue-stone-500">Loading locations…</p>}
 
       {groups.map(({ location, spaces }) => (
-        <section key={location.id} className="space-y-4">
+        <section key={location.id} className="space-y-5">
           <div>
-            <h2 className="text-2xl text-cue-navy">{location.name}</h2>
-            <p className="text-sm font-light text-cue-muted">
+            <h2 className="text-2xl">{location.name}</h2>
+            <p className="text-sm text-cue-stone-500">
               {location.city}
               {location.neighborhood ? ` · ${location.neighborhood}` : ""}
               {location.addressPublic ? ` · ${location.addressPublic}` : ""}
             </p>
           </div>
           <div className="grid gap-5 sm:grid-cols-2">
-            {spaces.map((space) => (
-              <Link
-                key={space.id}
-                href={`/spaces/${space.slug}`}
-                className="cue-card group block overflow-hidden transition hover:border-cue-navy/25"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={
-                    space.photos[0]?.url ||
-                    "https://images.unsplash.com/photo-1497366216548-37526070297c?w=800"
-                  }
-                  alt={space.photos[0]?.alt || space.title}
-                  className="h-40 w-full object-cover"
-                />
-                <div className="space-y-2 p-5">
+            {spaces.map((space) => {
+              const code = roomCode(space);
+              return (
+                <div
+                  key={space.id}
+                  data-testid={`room-card-${code.toLowerCase()}`}
+                  className="cue-card cue-card-interactive flex flex-col gap-4 p-6"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-xl text-cue-navy">{space.title}</h3>
-                      <p className="text-sm font-light text-cue-muted">
-                        {space.subtitle}
+                      <h3 className="text-xl">{space.title}</h3>
+                      <p className="mt-1 flex items-center gap-1.5 text-sm text-cue-stone-500">
+                        <Users aria-hidden className="h-4 w-4" />
+                        {space.capacity} seats
                       </p>
                     </div>
-                    <div className="rounded-lg bg-cue-navy/5 px-2.5 py-1.5 text-right">
-                      <div className="text-sm font-bold text-cue-navy">
+                    <div className="shrink-0 text-right">
+                      <div className="text-lg font-semibold text-cue-navy-600">
                         {money(space.pricing.baseHourlyCents)}
                       </div>
-                      <div className="text-[10px] font-light text-cue-navy-soft">
-                        / hr
-                      </div>
+                      <div className="text-xs text-cue-stone-500">/ hr</div>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    <span className="cue-chip">Capacity {space.capacity}</span>
-                    <span className="cue-chip">Request to book</span>
-                  </div>
-                  <span className="inline-block pt-1 text-sm font-medium text-cue-navy group-hover:underline">
-                    View & book →
-                  </span>
+                  <p className="text-sm text-cue-stone-700">{space.subtitle}</p>
+                  <Link
+                    href={`/spaces/${space.slug}`}
+                    className={buttonClasses("secondary", "mt-auto self-start")}
+                  >
+                    Book {code}
+                  </Link>
                 </div>
-              </Link>
-            ))}
+              );
+            })}
           </div>
         </section>
       ))}
