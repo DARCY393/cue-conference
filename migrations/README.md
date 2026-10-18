@@ -12,6 +12,7 @@ psql "$DATABASE_URL" -f migrations/006_payments_and_messages.sql
 psql "$DATABASE_URL" -f migrations/007_helpers.sql
 psql "$DATABASE_URL" -f migrations/008_seed_cue.sql   # optional
 psql "$DATABASE_URL" -f migrations/009_locations.sql  # locations + room 2
+psql "$DATABASE_URL" -f migrations/010_arts_district_rooms.sql  # Arts District rename + M1-M4
 ```
 
 Or:
@@ -42,4 +43,19 @@ npm run db:migrate          # skips 001–008 after bootstrap; applies 009
 npm run db:migrate:009
 # or
 psql "$DATABASE_URL" -f migrations/009_locations.sql
+```
+
+## Applying 010 on an existing DB
+
+`010_arts_district_rooms.sql` is idempotent (`IF NOT EXISTS` / `ON CONFLICT` / guarded `ALTER`).
+It renames the Arts District location, renames the two existing rooms to M1/M2, adds M3/M4,
+adds `spaces.google_calendar_id` / `spaces.google_busy_calendar_ids` / `bookings.google_event_id`,
+and deactivates the parking add-on. Preferred:
+
+```bash
+npm run db:migrate          # skips already-applied files; applies 010
+# or
+npm run db:migrate:010
+# or
+psql "$DATABASE_URL" -f migrations/010_arts_district_rooms.sql
 ```

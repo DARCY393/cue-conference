@@ -52,12 +52,14 @@ export interface LocationPublic {
   city: string;
   neighborhood?: string;
   addressPublic?: string;
+  timezone?: string;
 }
 
 export interface SpacePublic {
   id: string;
   slug: string;
   title: string;
+  shortTitle?: string;
   subtitle?: string;
   description?: string;
   city: string;
@@ -80,6 +82,10 @@ export interface SpacePublic {
   cancellationPolicyId?: string;
   location?: LocationPublic;
   locationId?: string;
+  /** Private — calendar sync internals. Never serialize to guest/public API responses. */
+  googleCalendarId?: string;
+  /** Private — extra calendars checked for busy only (not written to). */
+  googleBusyCalendarIds?: string[];
 }
 
 export interface QuoteAddonInput {
@@ -137,6 +143,7 @@ export interface Booking {
   cancelledAt?: string;
   completedAt?: string;
   stripePaymentIntentId?: string;
+  googleEventId?: string;
   accessDetails?: string;
   createdAt: string;
   guestEmail?: string;

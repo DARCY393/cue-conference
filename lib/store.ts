@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
-import { CUE_SPACES, HOST_EMAIL_DEFAULT, IDS } from "./seed";
+import { CUE_SPACES, HOST_EMAIL_DEFAULT, IDS, resolveLegacySpaceSlug } from "./seed";
 import type { Booking, Blockout, BusyInterval, SpacePublic } from "./types";
+import { toPublicSpaceJson } from "./space-public";
 
 /** Process-wide in-memory demo store (used when DATABASE_URL is absent). */
 class MemoryStore {
@@ -30,8 +31,9 @@ class MemoryStore {
   }
 
   getSpaceBySlug(slug: string): SpacePublic | null {
+    const canonical = resolveLegacySpaceSlug(slug);
     const space = this.spaces.find(
-      (s) => s.slug === slug && s.status !== "draft"
+      (s) => (s.slug === slug || s.slug === canonical) && s.status !== "draft"
     );
     return space ? this.toPublic(space) : null;
   }
@@ -43,11 +45,7 @@ class MemoryStore {
   }
 
   toPublic(space: SpacePublic): SpacePublic {
-    const copy = structuredClone(space);
-    delete copy.addressPrivate;
-    delete copy.hostId;
-    delete copy.cancellationPolicyId;
-    return copy;
+    return toPublicSpaceJson(space);
   }
 
   hostSpaceIds(): Set<string> {

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getSpaceBySlug, getSpaceById } from "@/lib/space-service";
+import { toPublicSpaceJson } from "@/lib/space-public";
 import { jsonError, jsonOk } from "@/lib/http";
 
 const UUID_RE =
@@ -14,9 +15,5 @@ export async function GET(
     ? (await getSpaceById(key)) || (await getSpaceBySlug(key))
     : await getSpaceBySlug(key);
   if (!space) return jsonError(404, "not_found", "Space not found");
-  const pub = { ...space };
-  delete pub.addressPrivate;
-  delete pub.hostId;
-  delete pub.cancellationPolicyId;
-  return jsonOk(pub);
+  return jsonOk(toPublicSpaceJson(space));
 }

@@ -59,6 +59,14 @@ const TIME_OPTIONS: string[] = Array.from({ length: 23 }, (_, i) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 });
 
+function addMinutesToTime(hhmm: string, minutesToAdd: number): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  const total = Math.min((h || 0) * 60 + (m || 0) + minutesToAdd, 24 * 60);
+  const hh = Math.floor(total / 60) % 24;
+  const mm = total % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
 function PaymentConfirmPanel({
   onSuccess,
   onError,
@@ -126,7 +134,7 @@ export default function SpacePage() {
   const [error, setError] = useState<string | null>(null);
   const [date, setDate] = useState("");
   const [startTime, setStartTime] = useState("09:00");
-  const [endTime, setEndTime] = useState("11:00");
+  const [endTime, setEndTime] = useState("12:00");
   const [parking, setParking] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
@@ -152,6 +160,24 @@ export default function SpacePage() {
       .then(setSpace)
       .catch((e) => setError(e.message));
   }, [slug]);
+
+  const minHours = space?.pricing.minHours ?? 1;
+
+  const minEndTime = useMemo(
+    () => addMinutesToTime(normalizeTime(startTime) || "07:00", minHours * 60),
+    [startTime, minHours]
+  );
+
+  const endTimeOptions = useMemo(
+    () => TIME_OPTIONS.filter((t) => t >= minEndTime),
+    [minEndTime]
+  );
+
+  useEffect(() => {
+    if (endTimeOptions.length && !endTimeOptions.includes(endTime)) {
+      setEndTime(endTimeOptions[0]);
+    }
+  }, [endTimeOptions, endTime]);
 
   const windowIso = useMemo(() => {
     if (!date || !space) return null;
@@ -360,7 +386,7 @@ export default function SpacePage() {
                 onChange={(e) => setEndTime(e.target.value)}
                 className="cue-input"
               >
-                {TIME_OPTIONS.map((t) => (
+                {endTimeOptions.map((t) => (
                   <option key={`e-${t}`} value={t}>
                     {t}
                   </option>
@@ -368,6 +394,9 @@ export default function SpacePage() {
               </select>
             </label>
           </div>
+          <p className="text-xs font-light text-cue-muted">
+            {minHours}-hour minimum
+          </p>
           {space.addons[0] && (
             <label className="flex items-start gap-2 text-sm">
               <input

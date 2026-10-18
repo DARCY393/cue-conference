@@ -1,8 +1,9 @@
-import { CUE_SPACE, CUE_SPACES, CUE_LOCATIONS, IDS } from "./seed";
+import { CUE_SPACE, CUE_SPACES, CUE_LOCATIONS, IDS, resolveLegacySpaceSlug } from "./seed";
 import { getStore, isDemoMode } from "./store";
 import { query } from "./db";
 import type { BusyInterval, LocationPublic, SpacePublic } from "./types";
 import { FLEXIBLE_RULES } from "./seed";
+import { toPublicSpaceJson } from "./space-public";
 
 type SpaceRow = {
   id: string;
@@ -33,6 +34,7 @@ type SpaceRow = {
   loc_city: string | null;
   loc_neighborhood: string | null;
   loc_address_public: string | null;
+  loc_timezone: string | null;
 };
 
 async function hydrateSpace(s: SpaceRow): Promise<SpacePublic> {
@@ -73,6 +75,7 @@ async function hydrateSpace(s: SpaceRow): Promise<SpacePublic> {
           city: s.loc_city,
           neighborhood: s.loc_neighborhood ?? undefined,
           addressPublic: s.loc_address_public ?? undefined,
+          timezone: s.loc_timezone ?? undefined,
         }
       : undefined;
 
@@ -141,7 +144,8 @@ const SPACE_SELECT = `
   SELECT s.*, u.name AS host_name, cp.name AS policy_name, cp.rules_json,
          hr.body_md AS host_rules,
          l.slug AS loc_slug, l.name AS loc_name, l.city AS loc_city,
-         l.neighborhood AS loc_neighborhood, l.address_public AS loc_address_public
+         l.neighborhood AS loc_neighborhood, l.address_public AS loc_address_public,
+         l.timezone AS loc_timezone
   FROM spaces s
   JOIN users u ON u.id = s.host_id
   LEFT JOIN locations l ON l.id = s.location_id
@@ -157,8 +161,17 @@ export async function getSpaceBySlug(slug: string): Promise<SpacePublic | null> 
     `${SPACE_SELECT} WHERE s.slug = $1 AND s.status = 'live'`,
     [slug]
   );
-  if (!rows[0]) return null;
-  return hydrateSpace(rows[0]);
+  if (rows[0]) return hydrateSpace(rows[0]);
+
+  const canonical = resolveLegacySpaceSlug(slug);
+  if (canonical !== slug) {
+    const { rows: legacyRows } = await query<SpaceRow>(
+      `${SPACE_SELECT} WHERE s.slug = $1 AND s.status = 'live'`,
+      [canonical]
+    );
+    if (legacyRows[0]) return hydrateSpace(legacyRows[0]);
+  }
+  return null;
 }
 
 export async function getSpaceById(id: string): Promise<SpacePublic | null> {
@@ -204,9 +217,10 @@ export async function listLocationsWithSpaces(): Promise<
     city: string;
     neighborhood: string | null;
     address_public: string | null;
+    timezone: string | null;
     sort_order: number;
   }>(
-    `SELECT id, slug, name, city, neighborhood, address_public, sort_order
+    `SELECT id, slug, name, city, neighborhood, address_public, timezone, sort_order
      FROM locations ORDER BY sort_order, name`
   );
 
@@ -226,6 +240,7 @@ export async function listLocationsWithSpaces(): Promise<
         city: r.city,
         neighborhood: r.neighborhood ?? undefined,
         addressPublic: r.address_public ?? undefined,
+        timezone: r.timezone ?? undefined,
       },
       spaces: byLoc.get(r.id) ?? [],
     })
@@ -286,3 +301,4 @@ export async function getBusy(
 }
 
 export { CUE_SPACE, CUE_SPACES, CUE_LOCATIONS, IDS };
+export { toPublicSpaceJson } from "./space-public";

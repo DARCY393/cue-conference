@@ -2,11 +2,15 @@ import { NextRequest } from "next/server";
 import { chargeOvertime } from "@/lib/bookings";
 import { requireHost } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
+import { FEATURES } from "@/lib/features";
 
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ bookingId: string }> }
 ) {
+  if (!FEATURES.overtime) {
+    return jsonError(404, "feature_disabled", "Overtime billing is currently disabled.");
+  }
   const auth = requireHost(req);
   if (!auth.ok) return jsonError(auth.status, auth.error, auth.message);
   const { bookingId } = await ctx.params;

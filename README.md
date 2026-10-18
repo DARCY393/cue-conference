@@ -1,6 +1,6 @@
 # Cue Conference — booking MVP
 
-Multi-location **Request-to-book** conference rooms (Cue · Arts District / Downtown · `cue-dallas`, `cue-downtown-boardroom`).
+Multi-location **Request-to-book** conference rooms (Cue Arts District · `arts-district-m1`, `arts-district-m2`, `arts-district-m3`, `arts-district-m4`).
 
 Built with **Next.js App Router**, TypeScript, Tailwind, Postgres migrations, and Stripe PaymentIntents (`capture_method=manual`).
 
@@ -19,19 +19,19 @@ Visual-only restyle — booking logic, Stripe Payment Element, and validation ar
 
 | Setting | Value |
 |--------|--------|
-| Location | Arts District / Downtown (`downtown-arts-district`) |
-| Rooms | `cue-dallas` (Conference Room), `cue-downtown-boardroom` (Boardroom) |
+| Location | Cue Arts District (`arts-district`, legacy slug `downtown-arts-district` still resolves) |
+| Rooms | `arts-district-m1` (M1, 10 seats), `arts-district-m2` (M2, 20 seats), `arts-district-m3` (M3, 5 seats), `arts-district-m4` (M4, 10 seats) |
 | Address (public) | 750 N. St. Paul Street, Dallas, TX 75201 |
 | Timezone | `America/Chicago` |
-| Capacity | 10 each (boardroom capacity/title **placeholder** — confirm with client) |
-| Rate | \$70/hr (7000¢) — boardroom rate **placeholder** |
-| Minimum | 1 hour |
-| Long booking | 20% off at 8+ hours |
-| Overtime | 1.5× per 30 minutes |
-| Parking addon | \$25/day (2500¢) per space |
+| Rate | \$70/hr (7000¢) per room, configurable per room (`DEFAULT_HOURLY_CENTS` in `lib/seed.ts`) |
+| Minimum | 3 hours — enforced server-side (quote + booking APIs) and in the guest UI |
+| Long booking discount | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
+| Overtime | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
+| Parking addon | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
 | Hours | Mon–Fri 7:00–18:00 |
 | Flow | Request-to-book + host accept/decline |
 | Cancel | Flexible (grace / 7-day full / 24h partial) |
+| Stripe | Test mode only — live keys (`sk_live_`/`rk_live_`/`pk_live_`) are refused unless `ALLOW_STRIPE_LIVE=true` |
 
 Out of scope: Instant Book, marketplace fees.
 
@@ -41,19 +41,26 @@ Spaces belong to a **location** (`locations` table). Guest URLs are `/spaces/{sl
 
 | Location slug | Name | Rooms |
 |---------------|------|-------|
-| `downtown-arts-district` | Arts District / Downtown | `cue-dallas`, `cue-downtown-boardroom` |
+| `arts-district` (legacy: `downtown-arts-district`) | Cue Arts District | `arts-district-m1` (M1), `arts-district-m2` (M2), `arts-district-m3` (M3), `arts-district-m4` (M4) |
+
+Legacy room slugs `cue-dallas` and `cue-downtown-boardroom` redirect (web) and resolve
+via `getSpaceBySlug` (API): `cue-dallas` → `arts-district-m1`; `cue-downtown-boardroom`
+→ homepage (no 1:1 replacement).
 
 **Add a location + room (existing DB):**
 
 1. Prefer `npm run db:migrate` (tracks applied files in `schema_migrations`; skips already-applied).
-2. Or apply only the locations migration:
+2. Or apply only the Arts District migration:
    ```bash
-   npm run db:migrate:009
-   # or: psql "$DATABASE_URL" -f migrations/009_locations.sql
+   npm run db:migrate:010
+   # or: psql "$DATABASE_URL" -f migrations/010_arts_district_rooms.sql
    ```
 3. For a *new* location later, insert into `locations`, then `spaces` (+ hours, amenities, addons, host_rules), or extend demo seed in `lib/seed.ts`.
 
-**Placeholders to confirm with client:** Boardroom title, capacity (currently 10), hourly rate (currently \$70), and any copy differences vs Conference Room.
+**Per-room Google Calendar columns** (`spaces.google_calendar_id`,
+`spaces.google_busy_calendar_ids`, `bookings.google_event_id`) were added in
+migration `010` for a later calendar-sync chunk. They are never included in
+public API responses (stripped by `lib/space-public.ts`'s `toPublicSpaceJson`).
 
 ## Quick start (demo mode)
 
@@ -68,7 +75,7 @@ npm run dev
 ```
 
 - Home (locations + rooms): [http://localhost:3000/](http://localhost:3000/)
-- Guest UIs: [Conference Room](http://localhost:3000/spaces/cue-dallas) · [Boardroom](http://localhost:3000/spaces/cue-downtown-boardroom)
+- Guest UIs: [M1](http://localhost:3000/spaces/arts-district-m1) · [M2](http://localhost:3000/spaces/arts-district-m2) · [M3](http://localhost:3000/spaces/arts-district-m3) · [M4](http://localhost:3000/spaces/arts-district-m4)
 - Host UI: [http://localhost:3000/host](http://localhost:3000/host) — send `Authorization: Bearer <HOST_EMAIL>` (default `host@example.com`)
 
 
@@ -152,7 +159,7 @@ Notes:
 npm run db:migrate
 ```
 
-That applies pending migrations under `migrations/` (tracked in `schema_migrations`). On a **populated** Tailscale DB that already ran 001–008 without tracking, the first `db:migrate` bootstraps those filenames as applied and only runs new files (e.g. `009_locations.sql`). To apply 009 alone: `npm run db:migrate:009` or `psql "$DATABASE_URL" -f migrations/009_locations.sql`.
+That applies pending migrations under `migrations/` (tracked in `schema_migrations`). On a **populated** Tailscale DB that already ran 001–008 without tracking, the first `db:migrate` bootstraps those filenames as applied and only runs new files (e.g. `009_locations.sql`, `010_arts_district_rooms.sql`). To apply one migration alone: `npm run db:migrate:009` / `npm run db:migrate:010`, or `psql "$DATABASE_URL" -f migrations/00X_….sql`.
 
 ### 6. Run the app (Tailscale-only access)
 
@@ -172,7 +179,7 @@ npm run start -- -H 0.0.0.0 -p 3000
 Bind `0.0.0.0` so other devices on your **tailnet** can hit the MagicDNS name/IP. Keep the host’s **public** firewall closed on `3000` unless you intentionally publish it. Access from your laptop over Tailscale:
 
 - Home: `http://<tailscale-name-or-ip>:3000/`
-- Guest: `…/spaces/cue-dallas` or `…/spaces/cue-downtown-boardroom`
+- Guest: `…/spaces/arts-district-m1` (or `-m2`/`-m3`/`-m4`)
 - Host: `http://<tailscale-name-or-ip>:3000/host` (email must match `HOST_EMAIL`)
 
 ### 7. Stripe webhooks on a private host
@@ -210,7 +217,7 @@ Put the printed `whsec_…` into `STRIPE_WEBHOOK_SECRET` and restart the app. Fo
 npm run db:migrate
 ```
 
-Migrations live in `migrations/001_…` … `009_locations.sql` (see `migrations/README.md`).
+Migrations live in `migrations/001_…` … `010_arts_district_rooms.sql` (see `migrations/README.md`).
 
 3. Set `STRIPE_SECRET_KEY` and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (and optionally `STRIPE_WEBHOOK_SECRET`). See **Stripe test mode checklist** below.
 4. `npm run dev`
@@ -239,10 +246,11 @@ Without Stripe keys, bookings still work with mock `*_secret_mock` client secret
 | `npm test` | Vitest — quote + Flexible refund math |
 | `npm run db:migrate` | Apply pending SQL migrations (schema_migrations) |
 | `npm run db:migrate:009` | One-shot apply `009_locations.sql` only |
+| `npm run db:migrate:010` | One-shot apply `010_arts_district_rooms.sql` only |
 
 ## API
 
-> **Next.js note:** App Router requires a single dynamic segment name under `spaces/`, so handlers live at `app/api/v1/spaces/[spaceId]/…`. `GET /api/v1/spaces/cue-dallas` still works — the param accepts either slug or UUID.
+> **Next.js note:** App Router requires a single dynamic segment name under `spaces/`, so handlers live at `app/api/v1/spaces/[spaceId]/…`. `GET /api/v1/spaces/arts-district-m1` still works — the param accepts either slug or UUID. Legacy slugs like `cue-dallas` also resolve.
 
 
 OpenAPI: [`openapi.yaml`](./openapi.yaml). Routes are mounted under **`/api/v1`** (local convenience vs the `/v1` servers in the spec).
@@ -277,21 +285,25 @@ OpenAPI: [`openapi.yaml`](./openapi.yaml). Routes are mounted under **`/api/v1`*
 
 ```
 app/
-  api/v1/…          OpenAPI-aligned route handlers
-  spaces/cue-dallas Guest listing + booking form
-  host/             Host queue UI
+  api/v1/…              OpenAPI-aligned route handlers
+  spaces/[slug]         Guest listing + booking form (arts-district-m1..m4)
+  host/                 Host queue UI
 lib/
-  quote.ts          Hours, long discount, addons, overtime
-  refund.ts         Flexible cancellation math
-  availability.ts   Bookable hours + overlap helpers
-  store.ts          In-memory demo store
-  bookings.ts       Booking lifecycle
-  stripe.ts         Stripe or mock PI
-migrations/         Raw SQL (001–008)
+  features.ts           Removed-feature flags (discount/overtime/parking)
+  quote.ts              Hours, long discount, addons, overtime
+  refund.ts             Flexible cancellation math
+  availability.ts       Bookable hours + overlap helpers
+  seed.ts               Demo-mode location/room data
+  space-public.ts       Strips private fields before API responses
+  store.ts              In-memory demo store
+  bookings.ts           Booking lifecycle
+  stripe.ts             Stripe (test-mode only) or mock PI
+docs/REMOVED_FEATURES.md  Restore steps for removed pricing features
+migrations/              Raw SQL (001–010)
 openapi.yaml
 __tests__/          quote + refund unit tests
 ```
 
 ## Demo mode behavior
 
-If `DATABASE_URL` is unset, APIs use the seeded Cue listings in memory (both Downtown rooms). If `STRIPE_SECRET_KEY` is unset, PaymentIntents return `pi_mock_*` / `*_secret_mock`. `npm run build` and `npm test` do not require either.
+If `DATABASE_URL` is unset, APIs use the seeded Cue Arts District listings in memory (M1–M4). If `STRIPE_SECRET_KEY` is unset, PaymentIntents return `pi_mock_*` / `*_secret_mock`. `npm run build` and `npm test` do not require either.

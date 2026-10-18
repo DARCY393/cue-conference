@@ -31,7 +31,7 @@ export default function RootLayout({
               />
             </a>
             <nav className="flex items-center gap-5 text-sm font-light text-white/90">
-              <Link href="/spaces/cue-dallas" className="text-white/90 hover:text-white">
+              <Link href="/spaces/arts-district-m1" className="text-white/90 hover:text-white">
                 Book space
               </Link>
               <Link href="/host" className="text-white/90 hover:text-white">

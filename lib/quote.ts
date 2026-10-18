@@ -1,4 +1,9 @@
 import type { AddonPublic, Quote, QuoteAddonInput, QuoteLineItem, SpacePricing } from "./types";
+import { FEATURES } from "./features";
+
+export interface QuoteFeatureFlags {
+  longBookingDiscount?: boolean;
+}
 
 export interface QuoteInput {
   startsAt: Date;
@@ -9,6 +14,8 @@ export interface QuoteInput {
   available?: boolean;
   feesCents?: number;
   taxCents?: number;
+  /** Override feature flags (tests / legacy fixtures); defaults to FEATURES. */
+  features?: QuoteFeatureFlags;
 }
 
 function hoursBetween(startsAt: Date, endsAt: Date): number {
@@ -85,12 +92,23 @@ export function calculateQuote(input: QuoteInput): Quote {
     throw new Error("endsAt must be after startsAt");
   }
   if (hours < pricing.minHours) {
-    throw new Error(`Minimum booking is ${pricing.minHours} hour(s)`);
+    const minCostDollars = (pricing.minHours * pricing.baseHourlyCents) / 100;
+    const rateDollars = pricing.baseHourlyCents / 100;
+    const hourWord = pricing.minHours === 1 ? "hour" : "hours";
+    throw new Error(
+      `Minimum booking is ${pricing.minHours} ${hourWord} ($${minCostDollars.toFixed(2)} at $${rateDollars}/hr).`
+    );
   }
 
   const baseCents = Math.round(hours * pricing.baseHourlyCents);
+  const longBookingDiscountEnabled =
+    input.features?.longBookingDiscount ?? FEATURES.longBookingDiscount;
   let discountCents = 0;
-  if (hours >= pricing.longBookingThresholdHours && pricing.longBookingDiscountBps > 0) {
+  if (
+    longBookingDiscountEnabled &&
+    hours >= pricing.longBookingThresholdHours &&
+    pricing.longBookingDiscountBps > 0
+  ) {
     discountCents = Math.floor((baseCents * pricing.longBookingDiscountBps) / 10000);
   }
 

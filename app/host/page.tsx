@@ -19,7 +19,6 @@ export default function HostPage() {
   const [boStart, setBoStart] = useState("");
   const [boEnd, setBoEnd] = useState("");
   const [boReason, setBoReason] = useState("");
-  const [overtimeMins, setOvertimeMins] = useState(30);
   const [spaces, setSpaces] = useState<SpacePublic[]>([]);
   const [blockoutSpaceId, setBlockoutSpaceId] = useState("");
 
@@ -120,20 +119,6 @@ export default function HostPage() {
     await load();
   }
 
-  async function chargeOt(bookingId: string) {
-    const res = await fetch(`/api/v1/host/bookings/${bookingId}/overtime`, {
-      method: "POST",
-      headers: headers(),
-      body: JSON.stringify({ extraMinutes: overtimeMins }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.message || "Overtime failed");
-      return;
-    }
-    alert(`Overtime ${money(data.amountCents)} — ${data.status}`);
-  }
-
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -221,28 +206,6 @@ export default function HostPage() {
                       Decline
                     </button>
                   </>
-                )}
-                {["accepted", "in_progress", "completed"].includes(b.status) && (
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={overtimeMins}
-                      onChange={(e) => setOvertimeMins(Number(e.target.value))}
-                      className="cue-input !mt-0 !w-auto !py-1.5"
-                    >
-                      {[30, 60, 90, 120].map((m) => (
-                        <option key={m} value={m}>
-                          {m} min OT
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => chargeOt(b.id)}
-                      className="rounded-full bg-cue-gold px-4 py-1.5 text-sm font-bold text-cue-ink"
-                    >
-                      Charge OT
-                    </button>
-                  </div>
                 )}
               </div>
             </div>
