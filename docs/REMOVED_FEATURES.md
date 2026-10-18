@@ -1,9 +1,10 @@
 # Removed features (off by default, restorable)
 
-Three pricing/billing behaviors were removed from the default product when the
-Arts District rooms (M1–M4) launched. Each is gated behind a flag in
-[`lib/features.ts`](../lib/features.ts) and the underlying engine code is kept
-intact so turning them back on is a config change, not a rewrite.
+Four pricing/billing behaviors were removed (or, in one case, never shipped)
+from the default product when the Arts District rooms (M1–M4) launched. The
+first three are gated behind a flag in [`lib/features.ts`](../lib/features.ts)
+and the underlying engine code is kept intact so turning them back on is a
+config change, not a rewrite.
 
 ## 1. Long-booking discount (20% off at 8+ hours)
 
@@ -54,3 +55,18 @@ intact so turning them back on is a config change, not a rewrite.
       'd0000000-0000-4000-8000-000000000002')` (and add rows for M3/M4 if
      parking should apply there too — the flag alone does not resurrect
      deactivated DB rows).
+
+## 4. 3-hour minimum booking (never shipped)
+
+- **Flag:** none — there is no feature flag for this because it never made
+  it into the default product in the first place.
+- **What changed:** an earlier draft of the Arts District pricing called for
+  a flat 3-hour minimum booking length. The shipped product uses a **per-room**
+  `minHours` instead (`lib/types.ts`'s `SpacePricing.minHours`,
+  `DEFAULT_MIN_HOURS` in `lib/seed.ts`), defaulting to **1 hour**, enforced in
+  `calculateQuote()` (`lib/quote.ts`) and on the booking-create API. Every
+  current room (M1–M4) is seeded with `minHours: 1`.
+- **To restore:** set `minHours` to `3` (or whatever value is wanted) on the
+  relevant room(s) — in `lib/seed.ts` for demo mode, or
+  `UPDATE spaces SET min_hours = 3 WHERE id IN (...)` for a real database.
+  This can be set per room; there's no single global switch.

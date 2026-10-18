@@ -4,14 +4,23 @@ Multi-location **Request-to-book** conference rooms (Cue Arts District · `arts-
 
 Built with **Next.js App Router**, TypeScript, Tailwind, Postgres migrations, and Stripe PaymentIntents (`capture_method=manual`).
 
+See [`DEPLOY.md`](./DEPLOY.md) for the VPS deploy runbook and
+[`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) for pricing/billing
+behaviors that were intentionally removed (and how to restore them).
+
 ## Branding
 
-UI chrome matches [thecue.work](https://thecue.work): navy (`#002e5b`), green (`#2ed47d`), gold (`#f7c02e`), Brown body + Domaine headings, and the Cue light logo in the header.
+UI chrome follows the official **Cue design system**: navy (`--cue-navy-600`)
+as the primary color, a single copper accent (`#B5651D`) reserved for one
+conversion call-to-action per view, warm paper/stone neutrals, Jost for
+display/headings and Public Sans for body text, and the Cue wordmark in the
+header. There are no gradients, no emoji, and icons (where used) come from
+`lucide-react`.
 
-- Tokens / `@font-face`: `app/globals.css` (`cue-navy`, `cue-green`, `cue-gold`, `cue-ink`, `cue-muted`, `cue-wash`)
-- Fonts: `public/fonts/` (Brown `.woff`, Domaine `.ttf` from Cue WP uploads)
-- Logo / favicon: `public/branding/cue-logo.png`, `public/branding/favicon-192.jpg`
-- Shared chrome: `app/layout.tsx` (header → thecue.work, footer contact)
+- Tokens: `app/globals.css` (`cue-navy-*`, `cue-copper-*`, `cue-stone-*`, `cue-paper`, radius/shadow/motion tokens as Tailwind v4 `@theme` variables)
+- Fonts: loaded via `next/font/google` (Jost, Public Sans) — no self-hosted font files
+- Logo / favicon: `public/branding/logo-cue-navy.png`, `logo-cue-light.png`, `favicon.png`
+- Shared chrome: `app/layout.tsx` (sticky header → thecue.work, navy-800 footer with address/phone/email)
 
 Visual-only restyle — booking logic, Stripe Payment Element, and validation are unchanged.
 
