@@ -69,7 +69,7 @@ async function hydrateSpace(s: SpaceRow): Promise<SpacePublic> {
       [s.id]
     ),
     query<{ url: string; alt: string | null; sort_order: number }>(
-      `SELECT url, alt, sort_order FROM space_photos WHERE space_id = $1 ORDER BY sort_order`,
+      `SELECT url, alt, sort_order FROM space_photos WHERE space_id = $1 ORDER BY sort_order LIMIT 3`,
       [s.id]
     ),
   ]);

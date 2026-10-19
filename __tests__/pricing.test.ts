@@ -142,3 +142,88 @@ describe("minimum booking enforcement (no 3-hour minimum)", () => {
     expect(q.totalCents).toBe(7000);
   });
 });
+
+describe("long-booking discount (20% off at 8+ total billable hours, on by default)", () => {
+  it("M1 8h same-day gets 20% off: base $560, discount $112, total $448", async () => {
+    const result = await createQuoteForSpace(IDS.m1, at(0), at(8));
+    if (!result.ok) throw new Error(`expected ok quote, got ${result.error}: ${result.message}`);
+    expect(result.quote.hours).toBe(8);
+    expect(result.quote.baseCents).toBe(56000);
+    expect(result.quote.discountCents).toBe(11200);
+    expect(result.quote.totalCents).toBe(44800);
+  });
+
+  it("M1 7h same-day gets no discount", async () => {
+    const result = await createQuoteForSpace(IDS.m1, at(0), at(7));
+    if (!result.ok) throw new Error(`expected ok quote, got ${result.error}: ${result.message}`);
+    expect(result.quote.hours).toBe(7);
+    expect(result.quote.discountCents).toBe(0);
+    expect(result.quote.totalCents).toBe(49000);
+  });
+
+  it("M2 8h gets 20% off: base $1000, discount $200, total $800", async () => {
+    const result = await createQuoteForSpace(IDS.m2, at(0), at(8));
+    if (!result.ok) throw new Error(`expected ok quote, got ${result.error}: ${result.message}`);
+    expect(result.quote.baseCents).toBe(100000);
+    expect(result.quote.discountCents).toBe(20000);
+    expect(result.quote.totalCents).toBe(80000);
+    expect(result.quote.lineItems.some((li) => li.code === "discount_long_booking")).toBe(true);
+  });
+
+  it("can be kill-switched off via PRICING_ENABLE_LONG_BOOKING_DISCOUNT=false", () => {
+    const q = calculateQuote({
+      startsAt: at(0),
+      endsAt: at(8),
+      pricing: CUE_M1.pricing,
+      addonsCatalog: CUE_M1.addons,
+      features: { longBookingDiscount: false },
+    });
+    expect(q.discountCents).toBe(0);
+    expect(q.totalCents).toBe(56000);
+  });
+});
+
+describe("multi-day reservations (one daily window per bookable weekday)", () => {
+  it("3 days x 3h = 9h total gets 20% off the full base", async () => {
+    // Mon 9:00-12:00 through Wed 9:00-12:00 (endDate = any instant on Wed).
+    const result = await createQuoteForSpace(IDS.m1, at(0), at(3), undefined, at(48));
+    if (!result.ok) throw new Error(`expected ok quote, got ${result.error}: ${result.message}`);
+    expect(result.quote.hours).toBe(9);
+    expect(result.quote.baseCents).toBe(63000); // 9h x $70
+    expect(result.quote.discountCents).toBe(12600); // 20%
+    expect(result.quote.totalCents).toBe(50400);
+  });
+
+  it("2 days x 3h = 6h total gets no discount", async () => {
+    const result = await createQuoteForSpace(IDS.m1, at(0), at(3), undefined, at(24));
+    if (!result.ok) throw new Error(`expected ok quote, got ${result.error}: ${result.message}`);
+    expect(result.quote.hours).toBe(6);
+    expect(result.quote.discountCents).toBe(0);
+    expect(result.quote.totalCents).toBe(42000);
+  });
+
+  it("skips the weekend gap: Fri 9-12 through Mon 9-12 bills only Fri + Mon (6h), not 4 calendar days", async () => {
+    // at(96) from Mon 9am lands on Friday 9am the same week.
+    const friStart = at(96);
+    const friEnd = at(99);
+    const monEnd = at(96 + 72); // following Monday
+    const result = await createQuoteForSpace(IDS.m1, friStart, friEnd, undefined, monEnd);
+    if (!result.ok) throw new Error(`expected ok quote, got ${result.error}: ${result.message}`);
+    expect(result.quote.hours).toBe(6);
+  });
+
+  it("stores the booking's startsAt/endsAt as first-day-start to last-day-end", async () => {
+    const created = await createBookingRequest({
+      spaceId: IDS.m1,
+      startsAt: at(0).toISOString(),
+      endsAt: at(3).toISOString(),
+      endDate: at(48).toISOString(),
+      guest: { name: "Multi Day Guest", email: "multiday@example.com" },
+    });
+    if (!("booking" in created)) throw new Error("expected a booking");
+    expect(new Date(created.booking.startsAt).getTime()).toBe(at(0).getTime());
+    // Last day (Wed) ends at 12:00 Chicago, i.e. 48h + 3h from Mon 9:00.
+    expect(new Date(created.booking.endsAt).getTime()).toBe(at(51).getTime());
+    expect(created.booking.totalCents).toBe(50400);
+  });
+});

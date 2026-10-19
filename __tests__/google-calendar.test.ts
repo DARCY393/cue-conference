@@ -71,9 +71,17 @@ describe("Google Calendar mock busy", () => {
     expect(m2.ok).toBe(true);
   });
 
-  it("M2's extra busy-only calendar also blocks M2", async () => {
-    setMockBusy(CUE_M2.googleBusyCalendarIds![0], [BUSY_10_11_UTC]);
+  it("M2 checks only 'SPP - M2 Conference Room'; the old 'M2 - SPP' calendar is ignored", async () => {
+    expect(CUE_M2.googleBusyCalendarIds ?? []).toEqual([]);
 
+    setMockBusy(
+      "c_4a620221db3b792706f2006543986fa6ba4de1b596798b2977daef22623147c9@group.calendar.google.com",
+      [BUSY_10_11_UTC]
+    );
+    const ignored = await createQuoteForSpace(IDS.m2, WINDOW_START, WINDOW_END);
+    expect(ignored.ok).toBe(true);
+
+    setMockBusy(CUE_M2.googleCalendarId!, [BUSY_10_11_UTC]);
     const m2 = await createQuoteForSpace(IDS.m2, WINDOW_START, WINDOW_END);
     expect(m2.ok).toBe(false);
     if (!m2.ok) {

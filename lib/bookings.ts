@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { calculateQuote, calculateOvertimeCents, computeAddonCents } from "./quote";
 import { calculateFlexibleRefund, FLEXIBLE_DEFAULT } from "./refund";
-import { isAvailable, withinBookableHours } from "./availability";
+import { expandDayWindows, isAvailable, totalWindowHours } from "./availability";
 import { getBusy, getSpaceById } from "./space-service";
 import { getStore, isDemoMode } from "./store";
 import { query } from "./db";
@@ -44,19 +44,33 @@ export function sanitizeBookingForApi(b: Booking): Booking {
 }
 
 export type ApiErr = { ok: false; error: string; message: string; status: number };
-export type QuoteOk = { ok: true; quote: import("./types").Quote; space: SpacePublic };
+export type QuoteOk = {
+  ok: true;
+  quote: import("./types").Quote;
+  space: SpacePublic;
+  /** Reservation span actually billed/reserved: first day's start to last day's end. */
+  range: { startsAt: Date; endsAt: Date };
+};
 
+/**
+ * `startsAt`/`endsAt` give the daily start/end time-of-day (and, for a
+ * single-day booking, the only day). `endDate` is the optional calendar date
+ * of the last day for a multi-day reservation (default = same day as
+ * `startsAt`) — see `expandDayWindows()` in `lib/availability.ts`.
+ */
 export async function createQuoteForSpace(
   spaceId: string,
   startsAt: Date,
   endsAt: Date,
-  addons?: QuoteAddonInput[]
+  addons?: QuoteAddonInput[],
+  endDate?: Date | null
 ): Promise<QuoteOk | ApiErr> {
   const space = await getSpaceById(spaceId);
   if (!space) {
     return { ok: false, error: "not_found", message: "Space not found", status: 404 };
   }
-  if (!withinBookableHours(startsAt, endsAt, space.timezone, space.bookableHours)) {
+  const windows = expandDayWindows(startsAt, endsAt, endDate ?? null, space.timezone, space.bookableHours);
+  if (windows.length === 0) {
     return {
       ok: false,
       error: "outside_bookable_hours",
@@ -64,8 +78,11 @@ export async function createQuoteForSpace(
       status: 409,
     };
   }
-  const busy = await getBusy(spaceId, startsAt, endsAt);
-  const googleBusy = await getGoogleBusy(space, startsAt, endsAt);
+  const rangeStart = windows[0].startsAt;
+  const rangeEnd = windows[windows.length - 1].endsAt;
+
+  const busy = await getBusy(spaceId, rangeStart, rangeEnd);
+  const googleBusy = await getGoogleBusy(space, rangeStart, rangeEnd);
   if (!googleBusy.ok) {
     return {
       ok: false,
@@ -74,7 +91,8 @@ export async function createQuoteForSpace(
       status: 409,
     };
   }
-  const available = isAvailable(startsAt, endsAt, [...busy, ...googleBusy.busy]);
+  const allBusy = [...busy, ...googleBusy.busy];
+  const available = windows.every((w) => isAvailable(w.startsAt, w.endsAt, allBusy));
   if (!available) {
     return {
       ok: false,
@@ -85,15 +103,16 @@ export async function createQuoteForSpace(
   }
   try {
     const quote = calculateQuote({
-      startsAt,
-      endsAt,
+      startsAt: rangeStart,
+      endsAt: rangeEnd,
+      totalHours: totalWindowHours(windows),
       pricing: space.pricing,
       addonsCatalog: space.addons,
       addonSelections: addons,
       available: true,
       roomLabel: space.shortTitle,
     });
-    return { ok: true, quote, space };
+    return { ok: true, quote, space, range: { startsAt: rangeStart, endsAt: rangeEnd } };
   } catch (e) {
     return {
       ok: false,
@@ -115,23 +134,27 @@ export async function createBookingRequest(body: {
   spaceId: string;
   startsAt: string;
   endsAt: string;
+  /** Calendar date (any ISO instant on that local day) of a multi-day reservation's last day. */
+  endDate?: string;
   addons?: (QuoteAddonInput & { meta?: Record<string, unknown> })[];
   guestNotes?: string;
   activityDescription?: string;
   guest: { name: string; email: string; phone?: string };
 }): Promise<CreateBookingResult> {
-  const startsAt = new Date(body.startsAt);
-  const endsAt = new Date(body.endsAt);
+  const dailyStartsAt = new Date(body.startsAt);
+  const dailyEndsAt = new Date(body.endsAt);
   const quoted = await createQuoteForSpace(
     body.spaceId,
-    startsAt,
-    endsAt,
-    body.addons
+    dailyStartsAt,
+    dailyEndsAt,
+    body.addons,
+    body.endDate ? new Date(body.endDate) : null
   );
   if (!quoted.ok) {
     return { error: quoted.error, message: quoted.message, status: quoted.status };
   }
-  const { quote, space } = quoted;
+  const { quote, space, range } = quoted;
+  const { startsAt, endsAt } = range;
 
   const stripe = await createManualCapturePaymentIntent({
     amountCents: quote.totalCents,
@@ -396,6 +419,13 @@ export async function acceptBooking(id: string) {
   const startsAt = new Date(booking.startsAt);
   const endsAt = new Date(booking.endsAt);
   const space = await getSpaceById(booking.spaceId);
+  // Re-derive the reservation's per-day windows (startsAt/endsAt carry the
+  // first day's start time-of-day and the last day's end time-of-day — see
+  // expandDayWindows() in lib/availability.ts) so a multi-day booking's
+  // off-hours/weekend gaps aren't treated as reserved on re-check.
+  const windows = space
+    ? expandDayWindows(startsAt, endsAt, endsAt, space.timezone, space.bookableHours)
+    : [{ startsAt, endsAt }];
   const busy = await getBusy(booking.spaceId, startsAt, endsAt);
   // exclude self
   const others = busy.filter(
@@ -414,7 +444,7 @@ export async function acceptBooking(id: string) {
     }
     allBusy = [...others, ...googleBusy.busy];
   }
-  if (!isAvailable(startsAt, endsAt, allBusy)) {
+  if (!windows.every((w) => isAvailable(w.startsAt, w.endsAt, allBusy))) {
     return {
       error: "slot_unavailable" as const,
       message: "Slot conflict on re-check",

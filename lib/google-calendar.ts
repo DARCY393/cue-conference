@@ -226,6 +226,13 @@ export async function getGoogleBusy(
 
 // ---------- Event create/delete ----------
 
+/**
+ * Creates a single calendar event spanning `booking.startsAt`..`booking.endsAt`.
+ * For a multi-day booking that span is first-day-start to last-day-end (see
+ * expandDayWindows() in lib/availability.ts), so the event visually covers
+ * the full range (including any skipped weekday gaps) rather than one event
+ * per bookable day — a simplification accepted for this product.
+ */
 export async function createGoogleBookingEvent(
   space: SpacePublic,
   booking: { id: string; startsAt: string; endsAt: string; guestName?: string }

@@ -7,6 +7,8 @@ export async function POST(req: NextRequest) {
     spaceId?: string;
     startsAt?: string;
     endsAt?: string;
+    /** Calendar date (any ISO instant on that local day) of a multi-day reservation's last day. */
+    endDate?: string;
     addons?: { addonId: string; quantity?: number; meta?: Record<string, unknown> }[];
     guestNotes?: string;
     activityDescription?: string;
@@ -25,6 +27,7 @@ export async function POST(req: NextRequest) {
       spaceId: body.spaceId,
       startsAt: body.startsAt,
       endsAt: body.endsAt,
+      endDate: body.endDate,
       addons: body.addons,
       guestNotes: body.guestNotes,
       activityDescription: body.activityDescription,

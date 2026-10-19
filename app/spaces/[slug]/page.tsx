@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   Elements,
@@ -47,6 +47,68 @@ function RoomPlaceholder({ code, capacity }: { code: string; capacity: number })
     <div className="flex h-60 w-full flex-col items-center justify-center gap-1 bg-cue-stone-100">
       <span className="font-display text-5xl text-cue-navy-600">{code}</span>
       <span className="text-sm text-cue-stone-500">{capacity} seats</span>
+    </div>
+  );
+}
+
+/** Main photo + up to 2 clickable thumbnails. Falls back to the room-code placeholder if every photo fails to load or none exist. */
+function RoomGallery({ space }: { space: SpacePublic }) {
+  const photos = useMemo(() => space.photos.slice(0, 3), [space.photos]);
+  const [active, setActive] = useState(0);
+  const [errored, setErrored] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    setActive(0);
+    setErrored({});
+  }, [space.id]);
+
+  const allErrored = photos.length === 0 || photos.every((_, i) => errored[i]);
+  if (allErrored) {
+    return <RoomPlaceholder code={roomCode(space)} capacity={space.capacity} />;
+  }
+
+  const activeIndex = errored[active] ? photos.findIndex((_, i) => !errored[i]) : active;
+  const activePhoto = photos[activeIndex];
+
+  return (
+    <div>
+      {activePhoto && !errored[activeIndex] ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={activePhoto.url}
+          alt={activePhoto.alt || space.title}
+          className="h-60 w-full object-cover"
+          onError={() => setErrored((e) => ({ ...e, [activeIndex]: true }))}
+        />
+      ) : (
+        <RoomPlaceholder code={roomCode(space)} capacity={space.capacity} />
+      )}
+      {photos.length > 1 && (
+        <div className="flex gap-2 border-t border-cue-stone-200 bg-cue-stone-100 p-2">
+          {photos.map((p, i) =>
+            errored[i] ? null : (
+              <button
+                key={`${p.url}-${i}`}
+                type="button"
+                onClick={() => setActive(i)}
+                aria-label={`Show photo ${i + 1}`}
+                aria-current={i === activeIndex}
+                className={`h-14 w-20 shrink-0 overflow-hidden rounded-tile border-2 ${
+                  i === activeIndex ? "border-cue-copper-600" : "border-transparent"
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={p.url}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  onError={() => setErrored((e) => ({ ...e, [i]: true }))}
+                />
+              </button>
+            )
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -168,9 +230,9 @@ export default function SpacePage() {
   const [space, setSpace] = useState<SpacePublic | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [date, setDate] = useState(() => nextWeekdayChicago());
+  const [endDate, setEndDate] = useState(() => nextWeekdayChicago());
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("11:00");
-  const [imgError, setImgError] = useState(false);
   const [parking, setParking] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
@@ -179,13 +241,10 @@ export default function SpacePage() {
   const [guestPhone, setGuestPhone] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{
-    bookingId: string;
-    clientSecret: string;
-  } | null>(null);
+  /** The booking hold + its Stripe PaymentIntent — created inline, in the same card, once the quote and guest fields are valid. */
+  const [hold, setHold] = useState<{ bookingId: string; clientSecret: string } | null>(null);
   const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
-  const checkoutRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!slug) return;
@@ -194,16 +253,14 @@ export default function SpacePage() {
         if (!r.ok) throw new Error((await r.json()).message || "Failed to load");
         return r.json();
       })
-      .then((s) => {
-        setImgError(false);
-        setSpace(s);
-      })
+      .then((s) => setSpace(s))
       .catch((e) => setError(e.message));
   }, [slug]);
 
+  // Keep the end date from drifting before the start date when the guest edits the start date.
   useEffect(() => {
-    if (result) checkoutRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [result]);
+    if (endDate < date) setEndDate(date);
+  }, [date, endDate]);
 
   const minHours = space?.pricing.minHours ?? 1;
 
@@ -223,6 +280,8 @@ export default function SpacePage() {
     }
   }, [endTimeOptions, endTime]);
 
+  const isMultiDay = endDate > date;
+
   const windowIso = useMemo(() => {
     if (!date || !space) return null;
     // Build local Chicago wall times as ISO by appending offset approximation via Date parsing as local —
@@ -231,11 +290,16 @@ export default function SpacePage() {
     const end = normalizeTime(endTime);
     const startsAt = new Date(`${date}T${start}:00`);
     const endsAt = new Date(`${date}T${end}:00`);
-    return { startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() };
-  }, [date, startTime, endTime, space]);
+    const endDateInstant = isMultiDay ? new Date(`${endDate}T${end}:00`) : null;
+    return {
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      endDate: endDateInstant ? endDateInstant.toISOString() : undefined,
+    };
+  }, [date, endDate, isMultiDay, startTime, endTime, space]);
 
   const refreshQuote = useCallback(async () => {
-    if (!space || !windowIso) return;
+    if (!space || !windowIso || hold) return;
     setQuoteError(null);
     const addons = parking
       ? [{ addonId: space.addons[0]?.id, quantity: 1 }]
@@ -246,6 +310,7 @@ export default function SpacePage() {
       body: JSON.stringify({
         startsAt: windowIso.startsAt,
         endsAt: windowIso.endsAt,
+        endDate: windowIso.endDate,
         addons: addons.filter((a) => a.addonId),
       }),
     });
@@ -256,15 +321,25 @@ export default function SpacePage() {
       return;
     }
     setQuote(data);
-  }, [space, windowIso, parking]);
+  }, [space, windowIso, parking, hold]);
 
   useEffect(() => {
-    if (windowIso && space) void refreshQuote();
-  }, [windowIso, space, parking, refreshQuote]);
+    if (windowIso && space && !hold) void refreshQuote();
+  }, [windowIso, space, parking, hold, refreshQuote]);
 
-  async function submitBooking(e?: FormEvent | MouseEvent) {
+  const canCreateHold =
+    !!space &&
+    !!windowIso &&
+    !!quote &&
+    !quoteError &&
+    !hold &&
+    !submitting &&
+    guestName.trim().length > 0 &&
+    isValidEmail(guestEmail);
+
+  async function createHold(e?: FormEvent | MouseEvent) {
     e?.preventDefault();
-    if (!space || !windowIso) return;
+    if (!space || !windowIso || hold || submitting) return;
     if (!date) {
       setError("Pick a date.");
       return;
@@ -279,6 +354,10 @@ export default function SpacePage() {
     }
     if (!isValidEmail(guestEmail)) {
       setError("Enter a valid email address.");
+      return;
+    }
+    if (!quote) {
+      setError("Fix the date/time above to get a quote first.");
       return;
     }
     setSubmitting(true);
@@ -296,6 +375,7 @@ export default function SpacePage() {
           spaceId: space.id,
           startsAt: windowIso.startsAt,
           endsAt: windowIso.endsAt,
+          endDate: windowIso.endDate,
           addons: addons.filter((a) => a.addonId),
           guestNotes: notes,
           guest: { name: guestName, email: guestEmail, phone: guestPhone || undefined },
@@ -307,15 +387,17 @@ export default function SpacePage() {
           data.message || data.error || `Booking failed (HTTP ${res.status})`
         );
       }
-      setResult({
-        bookingId: data.booking.id,
-        clientSecret: data.stripe.clientSecret,
-      });
+      setHold({ bookingId: data.booking.id, clientSecret: data.stripe.clientSecret });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Booking failed");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  /** Skip the click on "Continue to payment" entirely when the guest finishes email last. */
+  function handleEmailBlur() {
+    if (canCreateHold) void createHold();
   }
 
   if (error && !space) {
@@ -325,21 +407,13 @@ export default function SpacePage() {
     return <p className="text-cue-stone-500">Loading space…</p>;
   }
 
+  const fieldsLocked = !!hold;
+
   return (
     <div className="grid gap-8 lg:grid-cols-5">
       <section className="lg:col-span-3 space-y-6">
         <div className="cue-card overflow-hidden">
-          {space.photos[0]?.url && !imgError ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={space.photos[0].url}
-              alt={space.photos[0]?.alt || space.title}
-              className="h-60 w-full object-cover"
-              onError={() => setImgError(true)}
-            />
-          ) : (
-            <RoomPlaceholder code={roomCode(space)} capacity={space.capacity} />
-          )}
+          <RoomGallery space={space} />
           <div className="space-y-5 p-6 sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -395,28 +469,44 @@ export default function SpacePage() {
       <section className="lg:col-span-2">
         <form
           noValidate
-          onSubmit={submitBooking}
+          onSubmit={createHold}
           className="cue-card sticky top-[6.5rem] space-y-4 p-6"
         >
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-2xl">Request a booking</h2>
             {isTestOrMockStripe && <Badge tone="warning">Test mode</Badge>}
           </div>
-          <label className="block text-sm">
-            <span className="text-cue-stone-500">Date</span>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="cue-input"
-              aria-label="Date"
-            />
-          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block text-sm">
+              <span className="text-cue-stone-500">Date</span>
+              <input
+                type="date"
+                value={date}
+                disabled={fieldsLocked}
+                onChange={(e) => setDate(e.target.value)}
+                className="cue-input"
+                aria-label="Date"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-cue-stone-500">End date</span>
+              <input
+                type="date"
+                value={endDate}
+                min={date}
+                disabled={fieldsLocked}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="cue-input"
+                aria-label="End date"
+              />
+            </label>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-sm">
               <span className="text-cue-stone-500">Start</span>
               <select
                 value={startTime}
+                disabled={fieldsLocked}
                 onChange={(e) => setStartTime(e.target.value)}
                 className="cue-select"
                 aria-label="Start time"
@@ -432,6 +522,7 @@ export default function SpacePage() {
               <span className="text-cue-stone-500">End</span>
               <select
                 value={endTime}
+                disabled={fieldsLocked}
                 onChange={(e) => setEndTime(e.target.value)}
                 className="cue-select"
                 aria-label="End time"
@@ -444,11 +535,15 @@ export default function SpacePage() {
               </select>
             </label>
           </div>
+          <p className="text-xs text-cue-stone-500">
+            20% off for 8+ hours (whole reservation){isMultiDay ? " — each weekday in range is billed." : ""}
+          </p>
           {space.addons[0] && (
             <label className="flex items-start gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={parking}
+                disabled={fieldsLocked}
                 onChange={(e) => setParking(e.target.checked)}
                 className="mt-1"
               />
@@ -490,6 +585,7 @@ export default function SpacePage() {
             <span className="text-cue-stone-500">Your name</span>
             <input
               value={guestName}
+              disabled={fieldsLocked}
               onChange={(e) => setGuestName(e.target.value)}
               className="cue-input"
             />
@@ -501,7 +597,9 @@ export default function SpacePage() {
               inputMode="email"
               autoComplete="email"
               value={guestEmail}
+              disabled={fieldsLocked}
               onChange={(e) => setGuestEmail(e.target.value)}
+              onBlur={handleEmailBlur}
               className="cue-input"
             />
           </label>
@@ -509,6 +607,7 @@ export default function SpacePage() {
             <span className="text-cue-stone-500">Phone (optional)</span>
             <input
               value={guestPhone}
+              disabled={fieldsLocked}
               onChange={(e) => setGuestPhone(e.target.value)}
               className="cue-input"
             />
@@ -517,55 +616,62 @@ export default function SpacePage() {
             <span className="text-cue-stone-500">Notes</span>
             <textarea
               value={notes}
+              disabled={fieldsLocked}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
               className="cue-input"
             />
           </label>
           {error && <Alert tone="danger">{error}</Alert>}
-          {result ? (
-            <div ref={checkoutRef} data-testid="checkout" className="space-y-3">
-              <Alert tone="success" title="Request created">
-                <p className="break-all">Booking: {result.bookingId}</p>
-                <p className="mt-2 text-xs opacity-80">
-                  Payment uses manual capture — host accept will capture the hold.
-                </p>
-              </Alert>
-
-              {isMockSecret(result.clientSecret) ? (
-                <Alert
-                  tone="warning"
-                  title="Test mode — no Stripe keys configured"
-                  data-testid="stripe-test-alert"
-                >
-                  <p>
-                    A mock card hold of {quote ? money(quote.totalCents) : "the quoted amount"} was
-                    created; no card is charged. Set <code className="font-mono">STRIPE_SECRET_KEY</code>{" "}
-                    and <code className="font-mono">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code> for real
-                    test-mode card collection.
-                  </p>
+          {!hold ? (
+            <Button
+              type="button"
+              variant="accent"
+              fullWidth
+              onClick={(e) => void createHold(e)}
+              disabled={submitting || !quote}
+            >
+              {submitting ? "Placing hold…" : "Continue to payment"}
+            </Button>
+          ) : (
+            <div data-testid="hold-panel" className="space-y-3 border-t border-cue-stone-200 pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  <Badge tone="warning">Hold placed</Badge>
+                  <span className="text-xs text-cue-stone-500">awaiting host</span>
+                </span>
+                <span className="text-sm font-semibold text-cue-navy-600">
+                  {quote ? money(quote.totalCents) : ""}
+                </span>
+              </div>
+              {paymentMessage ? (
+                <Alert tone="success" title="Payment confirmed">
+                  {paymentMessage}
                 </Alert>
+              ) : isMockSecret(hold.clientSecret) ? (
+                <p className="text-sm text-cue-stone-600">
+                  Test mode — a mock card hold of {quote ? money(quote.totalCents) : "the quoted amount"}{" "}
+                  was placed; no card is charged. Set{" "}
+                  <code className="font-mono">STRIPE_SECRET_KEY</code> and{" "}
+                  <code className="font-mono">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code> for real test-mode
+                  card collection.
+                </p>
               ) : !stripePromise || !publishableKey ? (
                 <Alert tone="danger">
                   Booking created, but{" "}
                   <code className="font-mono">NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code> is missing —
                   cannot load Stripe Payment Element.
                 </Alert>
-              ) : paymentMessage ? (
-                <Alert tone="success" title="Payment confirmed">
-                  {paymentMessage}
-                </Alert>
               ) : (
-                <div className="space-y-2 rounded-card border border-cue-stone-200 p-3">
+                <div className="space-y-2">
                   <p className="flex items-center gap-2 text-sm font-semibold text-cue-navy-600">
                     <CreditCard aria-hidden className="h-4 w-4" />
-                    Enter payment details
-                    {isTestOrMockStripe && <Badge tone="warning">Test mode</Badge>}
+                    Pay to confirm your request
                   </p>
                   <Elements
                     stripe={stripePromise}
                     options={{
-                      clientSecret: result.clientSecret,
+                      clientSecret: hold.clientSecret,
                       appearance: { theme: "stripe" },
                     }}
                   >
@@ -579,20 +685,11 @@ export default function SpacePage() {
                       }}
                     />
                   </Elements>
-                  {paymentError && <Alert tone="danger">{paymentError}</Alert>}
                 </div>
               )}
+              {paymentError && <Alert tone="danger">{paymentError}</Alert>}
+              <p className="break-all text-xs text-cue-stone-400">Booking: {hold.bookingId}</p>
             </div>
-          ) : (
-            <Button
-              type="button"
-              variant="accent"
-              fullWidth
-              onClick={(e) => void submitBooking(e)}
-              disabled={submitting || !quote}
-            >
-              {submitting ? "Submitting…" : "Request Booking"}
-            </Button>
           )}
         </form>
       </section>

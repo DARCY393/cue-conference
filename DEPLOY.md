@@ -327,7 +327,7 @@ default, `live` once wired up).
    |------|---------------|-------------|
    | M1 | SPP - M1 Conference Room | `c_e88039667398de2f9dd4f5b5c52147b034323e48620c7cb4c278eefcdc0601a6@group.calendar.google.com` |
    | M2 | SPP - M2 Conference Room | `c_8b3363b1a13418a42df25d270780f453fa4f4e2de9be4b5d85bc3119ea23ff3a@group.calendar.google.com` |
-   | M2 (busy-only) | M2 - SPP | `c_4a620221db3b792706f2006543986fa6ba4de1b596798b2977daef22623147c9@group.calendar.google.com` |
+
    | M3 | SPP - M3 Conference Room | `c_fa24824eeb56172234a4e332185b1590926da705c57c76d6d99d3a164f696ba6@group.calendar.google.com` |
    | M4 | SPP - M4 Conference Room | `c_44bb9580defceabfbb00be84aee1b13223c607efffc9051673f813a5e03a6152@group.calendar.google.com` |
 

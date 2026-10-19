@@ -20,7 +20,13 @@ export async function POST(
   ctx: { params: Promise<{ spaceId: string }> }
 ) {
   const { spaceId: key } = await ctx.params;
-  let body: { startsAt?: string; endsAt?: string; addons?: { addonId: string; quantity?: number }[] };
+  let body: {
+    startsAt?: string;
+    endsAt?: string;
+    /** Calendar date (any ISO instant on that local day) of a multi-day reservation's last day. */
+    endDate?: string;
+    addons?: { addonId: string; quantity?: number }[];
+  };
   try {
     body = await req.json();
   } catch {
@@ -34,9 +40,16 @@ export async function POST(
   if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
     return jsonError(400, "bad_request", "Invalid dates");
   }
+  let endDate: Date | null = null;
+  if (body.endDate) {
+    endDate = new Date(body.endDate);
+    if (Number.isNaN(endDate.getTime())) {
+      return jsonError(400, "bad_request", "Invalid endDate");
+    }
+  }
   const spaceId = await resolveSpaceId(key);
   if (!spaceId) return jsonError(404, "not_found", "Space not found");
-  const result = await createQuoteForSpace(spaceId, startsAt, endsAt, body.addons);
+  const result = await createQuoteForSpace(spaceId, startsAt, endsAt, body.addons, endDate);
   if (!result.ok) {
     return jsonError(result.status, result.error, result.message);
   }

@@ -18,6 +18,12 @@ export interface QuoteInput {
   features?: QuoteFeatureFlags;
   /** Short room label for the space line item, e.g. "M2". Defaults to "Meeting room". */
   roomLabel?: string;
+  /**
+   * Precomputed total billable hours for a multi-day reservation (sum of
+   * each bookable day's window). When set, overrides the startsAt/endsAt
+   * difference — see `expandDayWindows()` in `lib/availability.ts`.
+   */
+  totalHours?: number;
 }
 
 function hoursBetween(startsAt: Date, endsAt: Date): number {
@@ -88,7 +94,7 @@ export function computeAddonCents(
 
 export function calculateQuote(input: QuoteInput): Quote {
   const { startsAt, endsAt, pricing, addonsCatalog, addonSelections } = input;
-  const hours = hoursBetween(startsAt, endsAt);
+  const hours = input.totalHours ?? hoursBetween(startsAt, endsAt);
 
   if (hours <= 0) {
     throw new Error("endsAt must be after startsAt");

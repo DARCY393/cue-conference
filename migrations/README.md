@@ -13,6 +13,7 @@ psql "$DATABASE_URL" -f migrations/007_helpers.sql
 psql "$DATABASE_URL" -f migrations/008_seed_cue.sql   # optional
 psql "$DATABASE_URL" -f migrations/009_locations.sql  # locations + room 2
 psql "$DATABASE_URL" -f migrations/010_arts_district_rooms.sql  # Arts District rename + M1-M4
+psql "$DATABASE_URL" -f migrations/011_restore_discount_and_room_photos.sql  # 20% long-booking discount + room photos
 ```
 
 Or:

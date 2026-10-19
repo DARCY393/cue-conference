@@ -86,8 +86,8 @@ const ROOM_PRICING: SpacePricing = {
   baseHourlyCents: DEFAULT_HOURLY_CENTS,
   minHours: DEFAULT_MIN_HOURS,
   longBookingThresholdHours: 8,
-  // Long-booking discount removed from the default product; see docs/REMOVED_FEATURES.md.
-  longBookingDiscountBps: 0,
+  // 20% off the whole reservation at 8+ total billable hours; see docs/REMOVED_FEATURES.md.
+  longBookingDiscountBps: 2000,
   overtimeMultiplier: 1.5,
   cleaningIncluded: true,
 };
@@ -116,11 +116,24 @@ export function legacyParkingAddon(id: string): AddonPublic {
 
 export const LEGACY_PARKING_ADDON: AddonPublic = legacyParkingAddon(IDS.parkingM1);
 
-const ROOM_PHOTO = {
-  url: "https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200",
-  alt: "Meeting room",
-  sortOrder: 0,
-};
+/** Up to 3 gallery photos per room (sortOrder 0-2); see docs on the 3-photo cap. */
+const ROOM_PHOTOS = [
+  {
+    url: "https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200",
+    alt: "Meeting room",
+    sortOrder: 0,
+  },
+  {
+    url: "https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=1200",
+    alt: "Meeting room seating",
+    sortOrder: 1,
+  },
+  {
+    url: "https://images.unsplash.com/photo-1431540015161-0bf868a2d407?w=1200",
+    alt: "Meeting room table",
+    sortOrder: 2,
+  },
+];
 
 function makeRoom(opts: {
   id: string;
@@ -151,7 +164,7 @@ function makeRoom(opts: {
       minHours: opts.minHours ?? DEFAULT_MIN_HOURS,
     },
     bookableHours: SHARED_HOURS,
-    photos: [{ ...ROOM_PHOTO }],
+    photos: ROOM_PHOTOS.map((p) => ({ ...p })),
     amenities: SHARED_AMENITIES,
     // Parking addon removed from the default catalog; see docs/REMOVED_FEATURES.md.
     addons: FEATURES.parkingAddon ? [legacyParkingAddon(opts.parkingAddonId)] : [],
@@ -187,10 +200,7 @@ export const CUE_M2: SpacePublic = makeRoom({
   baseHourlyCents: 12500,
   googleCalendarId:
     "c_8b3363b1a13418a42df25d270780f453fa4f4e2de9be4b5d85bc3119ea23ff3a@group.calendar.google.com",
-  // Extra calendar checked for busy only (named "M2 - SPP" in Google Calendar).
-  googleBusyCalendarIds: [
-    "c_4a620221db3b792706f2006543986fa6ba4de1b596798b2977daef22623147c9@group.calendar.google.com",
-  ],
+  // Busy + write sync use only "SPP - M2 Conference Room"; "M2 - SPP" is ignored.
   parkingAddonId: IDS.parkingM2,
 });
 

@@ -77,7 +77,7 @@ See **Google Calendar sync** below.
 
 Each room is backed by a Google **secondary calendar** (`c_…@group.calendar.google.com`,
 owned by `darcy@thecue.work`) — not a Calendar "resource". M2 also has a second,
-busy-only calendar ("M2 - SPP"). These calendars must be shared with whichever
+calendar ("SPP - M2 Conference Room"; the old "M2 - SPP" calendar is no longer used). These calendars must be shared with whichever
 Google identity the app authenticates as, with **"Make changes to events"**
 permission, or live-mode freebusy/event calls will fail.
 

@@ -1,23 +1,28 @@
 # Removed features (off by default, restorable)
 
 Four pricing/billing behaviors were removed (or, in one case, never shipped)
-from the default product when the Arts District rooms (M1–M4) launched. The
-first three are gated behind a flag in [`lib/features.ts`](../lib/features.ts)
-and the underlying engine code is kept intact so turning them back on is a
-config change, not a rewrite.
+from the default product when the Arts District rooms (M1–M4) launched. Three
+remain gated behind a flag in [`lib/features.ts`](../lib/features.ts) and the
+underlying engine code is kept intact so turning them back on is a config
+change, not a rewrite. The long-booking discount (below) has since been
+restored to the default product.
 
-## 1. Long-booking discount (20% off at 8+ hours)
+## 1. Long-booking discount (20% off at 8+ total billable hours) — RESTORED
 
-- **Flag:** `FEATURES.longBookingDiscount` — env `PRICING_ENABLE_LONG_BOOKING_DISCOUNT=true`
-- **What changed:** `long_booking_discount_bps` was set to `0` for every room
-  (migration `010_arts_district_rooms.sql`, `lib/seed.ts`'s `ROOM_PRICING`).
-  `calculateQuote()` in `lib/quote.ts` only applies the discount when the flag
-  is on **and** `pricing.longBookingDiscountBps > 0` — both gates must pass.
-- **To restore:**
-  1. Set `PRICING_ENABLE_LONG_BOOKING_DISCOUNT=true` in the environment.
-  2. Set `long_booking_discount_bps` back to the desired value (e.g. `2000` for
-     20%) on each room — `UPDATE spaces SET long_booking_discount_bps = 2000
-     WHERE id IN (...)`, or the equivalent seed change for demo mode.
+- **Status:** back on by default for all rooms (M1–M4) as of migration
+  `011_restore_discount_and_room_photos.sql` / `lib/seed.ts`'s `ROOM_PRICING`
+  (`long_booking_discount_bps = 2000`, `longBookingThresholdHours = 8`).
+- **Flag:** `FEATURES.longBookingDiscount` in `lib/features.ts` defaults to
+  `true`; set env `PRICING_ENABLE_LONG_BOOKING_DISCOUNT=false` to kill-switch
+  it off without a deploy. `calculateQuote()` in `lib/quote.ts` applies the
+  discount whenever the flag is on **and** `pricing.longBookingDiscountBps > 0`
+  **and** total billable hours for the reservation `>= longBookingThresholdHours`.
+- **Multi-day reservations:** the threshold and discount apply once to the
+  total billable hours across the whole reservation (every bookable weekday
+  from the start date to the optional end date), not per day — see
+  `expandDayWindows()` in `lib/availability.ts` and the "Multi-day bookings"
+  note there for how total hours are computed and how the booking's stored
+  `startsAt`/`endsAt` span is derived.
 
 ## 2. Overtime billing (1.5× per 30 minutes)
 
