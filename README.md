@@ -39,7 +39,7 @@ Visual-only restyle — booking logic, Stripe Payment Element, and validation ar
 | Parking addon | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
 | Hours | Mon–Fri 7:00–18:00 |
 | Flow | Request-to-book + host accept/decline |
-| Cancel | Flexible (grace / 7-day full / 24h partial) |
+| Cancel | Standard — free up to 48h before start, no refund after; host has 24h to respond or the hold auto-releases (`npm run bookings:expire` / cron) |
 | Stripe | Test mode only — live keys (`sk_live_`/`rk_live_`/`pk_live_`) are refused unless `ALLOW_STRIPE_LIVE=true` |
 
 Out of scope: Instant Book, marketplace fees.
@@ -110,8 +110,41 @@ npm run dev
 
 - Home (locations + rooms): [http://localhost:3000/](http://localhost:3000/)
 - Guest UIs: [M1](http://localhost:3000/spaces/arts-district-m1) · [M2](http://localhost:3000/spaces/arts-district-m2) · [M3](http://localhost:3000/spaces/arts-district-m3) · [M4](http://localhost:3000/spaces/arts-district-m4)
-- Host UI: [http://localhost:3000/host](http://localhost:3000/host) — send `Authorization: Bearer <HOST_EMAIL>` (default `host@example.com`)
+- Host UI: [http://localhost:3000/host](http://localhost:3000/host) — redirects to [/staff/login](http://localhost:3000/staff/login) until you sign in. Create an account first: `STAFF_EMAIL=you@example.com STAFF_NAME="Your Name" npm run staff:create` (see **Staff accounts** below).
 
+
+## Staff accounts
+
+`/host` and `/api/v1/host/*` are gated by real staff accounts (`staff_users` +
+`staff_sessions`, migration `012_staff_auth.sql`) instead of the old
+`HOST_EMAIL` bearer token. Passwords are hashed with Node's built-in `scrypt`
+(`lib/password.ts`) — plaintext is never stored or logged. Sessions are a
+random token in an HTTP-only, signed cookie (`SESSION_SECRET` in `.env`);
+`SESSION_SECRET` is required when `NODE_ENV=production` and falls back to a
+per-process random value in development so local runs and tests don't need
+one set.
+
+No staff accounts are created by seed data or migrations. Create or update
+one locally with:
+
+```bash
+STAFF_EMAIL=you@example.com STAFF_NAME="Your Name" npm run staff:create
+# prompts for a password without echoing it, or read it from STAFF_PASSWORD
+```
+
+This upserts by (lowercased) email — rerun it to change a password or
+reactivate an account. Multiple staff rows are supported (`role` column,
+default `admin`); there's no UI to add more yet, just rerun the script with a
+different `STAFF_EMAIL`.
+
+Sign in at `/staff/login`; `/host` redirects there if there's no valid
+session. Sign out from the host queue header, or `POST /api/v1/staff/logout`.
+
+Without `DATABASE_URL` set, staff accounts/sessions live in the same
+in-memory demo store as bookings — fine for local demos and tests, but note
+`npm run staff:create` then only affects *its own* process, not a separately
+running `npm run dev` server; set `DATABASE_URL` to share one account across
+processes.
 
 ## Tailscale host — same-server Postgres checklist
 
@@ -176,7 +209,8 @@ STRIPE_SECRET_KEY=sk_test_...
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 # STRIPE_WEBHOOK_SECRET=whsec_...   # after `stripe listen` or a public webhook endpoint
 
-HOST_EMAIL=you@yourdomain.com
+HOST_EMAIL=you@yourdomain.com   # notification "to" address only, not an auth gate
+SESSION_SECRET=paste-a-generated-value-here   # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 NEXT_PUBLIC_APP_URL=http://cue-server:3000
 # Prefer your MagicDNS name or Tailscale IP, e.g.
 # NEXT_PUBLIC_APP_URL=http://100.x.y.z:3000
@@ -193,7 +227,7 @@ Notes:
 npm run db:migrate
 ```
 
-That applies pending migrations under `migrations/` (tracked in `schema_migrations`). On a **populated** Tailscale DB that already ran 001–008 without tracking, the first `db:migrate` bootstraps those filenames as applied and only runs new files (e.g. `009_locations.sql`, `010_arts_district_rooms.sql`). To apply one migration alone: `npm run db:migrate:009` / `npm run db:migrate:010`, or `psql "$DATABASE_URL" -f migrations/00X_….sql`.
+That applies pending migrations under `migrations/` (tracked in `schema_migrations`). On a **populated** Tailscale DB that already ran 001–008 without tracking, the first `db:migrate` bootstraps those filenames as applied and only runs new files (e.g. `009_locations.sql`, `010_arts_district_rooms.sql`, `012_staff_auth.sql`, `013_standard_cancellation_policy.sql`). To apply one migration alone: `npm run db:migrate:009` / `npm run db:migrate:010`, or `psql "$DATABASE_URL" -f migrations/00X_….sql`. Then create a staff account — see **Staff accounts** above.
 
 ### 6. Run the app (Tailscale-only access)
 
@@ -214,7 +248,7 @@ Bind `0.0.0.0` so other devices on your **tailnet** can hit the MagicDNS name/IP
 
 - Home: `http://<tailscale-name-or-ip>:3000/`
 - Guest: `…/spaces/arts-district-m1` (or `-m2`/`-m3`/`-m4`)
-- Host: `http://<tailscale-name-or-ip>:3000/host` (email must match `HOST_EMAIL`)
+- Host: `http://<tailscale-name-or-ip>:3000/host` — sign in with a staff account (see **Staff accounts** above)
 
 ### 7. Stripe webhooks on a private host
 
@@ -251,7 +285,7 @@ Put the printed `whsec_…` into `STRIPE_WEBHOOK_SECRET` and restart the app. Fo
 npm run db:migrate
 ```
 
-Migrations live in `migrations/001_…` … `010_arts_district_rooms.sql` (see `migrations/README.md`).
+Migrations live in `migrations/001_…` … `013_standard_cancellation_policy.sql` (see `migrations/README.md`).
 
 3. Set `STRIPE_SECRET_KEY` and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (and optionally `STRIPE_WEBHOOK_SECRET`). See **Stripe test mode checklist** below.
 4. `npm run dev`
@@ -277,10 +311,12 @@ Without Stripe keys, bookings still work with mock `*_secret_mock` client secret
 | `npm run dev` | Next.js dev server |
 | `npm run build` | Production build (succeeds without DB/Stripe) |
 | `npm run lint` | ESLint |
-| `npm test` | Vitest — quote, Flexible refund, pricing, payment hold, Google Calendar sync |
+| `npm test` | Vitest — quote, cancellation refund, booking lifecycle/expiry, pricing, payment hold, Google Calendar sync, staff auth |
 | `npm run db:migrate` | Apply pending SQL migrations (schema_migrations) |
 | `npm run db:migrate:009` | One-shot apply `009_locations.sql` only |
 | `npm run db:migrate:010` | One-shot apply `010_arts_district_rooms.sql` only |
+| `npm run staff:create` | Upsert one staff account (`STAFF_EMAIL`/`STAFF_NAME`/`STAFF_PASSWORD` env, or a hidden password prompt) |
+| `npm run bookings:expire` | Auto-decline "requested" bookings past their 24h host response window, releasing each hold — run on a cron |
 
 ## API
 
@@ -304,12 +340,17 @@ OpenAPI: [`openapi.yaml`](./openapi.yaml). Routes are mounted under **`/api/v1`*
 | POST | `/api/v1/host/bookings/{id}/overtime` | 30-min OT charge |
 | GET/POST | `/api/v1/host/blockouts` | List / create |
 | DELETE | `/api/v1/host/blockouts/{id}` | Remove |
+| POST | `/api/v1/staff/login` | Staff sign-in; sets the session cookie |
+| POST | `/api/v1/staff/logout` | Clears the session |
+| GET | `/api/v1/staff/me` | Current staff user, or 401 |
 | POST | `/api/v1/webhooks/stripe` | Stripe events |
+| POST | `/api/v1/internal/expire-requests` | Cron target — auto-decline overdue `requested` bookings, release each hold |
 
-### Auth stub
+### Auth
 
-- **Host**: `Authorization: Bearer <HOST_EMAIL>` or `X-Host-Email` matching `HOST_EMAIL`.
+- **Host**: signed, HTTP-only `cue_staff_session` cookie set by `/api/v1/staff/login` (see **Staff accounts** above). `/api/v1/host/*` returns 401 without a valid session.
 - **Guest**: identified by email on booking create (`guest.email`).
+- **Cron**: `/api/v1/internal/expire-requests` requires `Authorization: Bearer <CRON_SECRET>`; 503 if `CRON_SECRET` isn't set, 401 if the header is missing/wrong.
 
 ### Email
 
@@ -321,7 +362,8 @@ OpenAPI: [`openapi.yaml`](./openapi.yaml). Routes are mounted under **`/api/v1`*
 app/
   api/v1/…              OpenAPI-aligned route handlers
   spaces/[slug]         Guest listing + booking form (arts-district-m1..m4)
-  host/                 Host queue UI
+  host/                 Host queue UI (redirects to /staff/login if signed out)
+  staff/login/          Staff sign-in page
 lib/
   features.ts           Removed-feature flags (discount/overtime/parking)
   quote.ts              Hours, long discount, addons, overtime
@@ -329,14 +371,17 @@ lib/
   availability.ts       Bookable hours + overlap helpers
   seed.ts               Demo-mode location/room data
   space-public.ts       Strips private fields before API responses
-  store.ts              In-memory demo store
+  store.ts              In-memory demo store (bookings, blockouts, staff users/sessions)
   bookings.ts           Booking lifecycle
   stripe.ts             Stripe (test-mode only) or mock PI
   google-calendar.ts     Google Calendar sync (disabled/mock/live)
+  password.ts            scrypt password hashing
+  staff-auth.ts           Staff login/session/cookie logic (DB + in-memory)
+scripts/create-staff-user.ts  `npm run staff:create` CLI
 docs/REMOVED_FEATURES.md  Restore steps for removed pricing features
-migrations/              Raw SQL (001–010)
+migrations/              Raw SQL (001–013)
 openapi.yaml
-__tests__/          quote, refund, pricing, payment-hold, google-calendar unit tests
+__tests__/          quote, refund, pricing, payment-hold, google-calendar, staff-auth unit tests
 ```
 
 ## Demo mode behavior

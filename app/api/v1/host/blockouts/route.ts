@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { randomUUID } from "crypto";
-import { requireHost } from "@/lib/auth";
+import { requireStaff } from "@/lib/staff-auth";
 import { jsonError, jsonOk } from "@/lib/http";
 import { getStore, isDemoMode } from "@/lib/store";
 import { getSpaceById } from "@/lib/space-service";
@@ -8,7 +8,7 @@ import { query } from "@/lib/db";
 import type { Blockout } from "@/lib/types";
 
 export async function GET(req: NextRequest) {
-  const auth = requireHost(req);
+  const auth = await requireStaff(req);
   if (!auth.ok) return jsonError(auth.status, auth.error, auth.message);
   const spaceId = req.nextUrl.searchParams.get("spaceId");
   if (!spaceId) return jsonError(400, "bad_request", "spaceId is required");
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireHost(req);
+  const auth = await requireStaff(req);
   if (!auth.ok) return jsonError(auth.status, auth.error, auth.message);
   let body: { spaceId?: string; startsAt?: string; endsAt?: string; reason?: string };
   try {

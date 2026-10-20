@@ -1,3 +1,11 @@
+export interface StaffUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  active: boolean;
+}
+
 export type BookingStatus =
   | "draft"
   | "requested"
@@ -10,13 +18,9 @@ export type BookingStatus =
 
 export type AddonUnit = "per_booking" | "per_day" | "per_item";
 
-export interface FlexibleRules {
-  full_refund_days_before: number;
-  partial_refund_hours_before: number;
-  partial_refund_bps: number;
-  partial_excludes_fees: boolean;
-  grace_hours_after_confirm: number;
-  grace_requires_hours_before_start: number;
+export interface CancellationRules {
+  /** Cancelling at least this many hours before start is a full refund (if captured) or a released hold (if not). */
+  free_cancellation_hours_before: number;
 }
 
 export interface SpacePricing {
@@ -74,7 +78,7 @@ export interface SpacePublic {
   addons: AddonPublic[];
   hostRulesMd?: string;
   healthSafetyMd?: string;
-  cancellationPolicy?: { name: string; rules: FlexibleRules };
+  cancellationPolicy?: { name: string; rules: CancellationRules };
   approxLocation?: { lat: number; lng: number };
   host?: { name: string };
   addressPrivate?: string;

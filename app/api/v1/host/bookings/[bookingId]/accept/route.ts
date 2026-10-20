@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
 import { acceptBooking, sanitizeBookingForApi } from "@/lib/bookings";
-import { requireHost } from "@/lib/auth";
+import { requireStaff } from "@/lib/staff-auth";
 import { jsonError, jsonOk } from "@/lib/http";
 
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ bookingId: string }> }
 ) {
-  const auth = requireHost(req);
+  const auth = await requireStaff(req);
   if (!auth.ok) return jsonError(auth.status, auth.error, auth.message);
   const { bookingId } = await ctx.params;
   const result = await acceptBooking(bookingId);

@@ -1,5 +1,5 @@
-import type { AddonPublic, FlexibleRules, LocationPublic, SpacePricing, SpacePublic } from "./types";
-import { FLEXIBLE_DEFAULT } from "./refund";
+import type { AddonPublic, CancellationRules, LocationPublic, SpacePricing, SpacePublic } from "./types";
+import { CANCELLATION_DEFAULT } from "./refund";
 import { FEATURES } from "./features";
 
 export const IDS = {
@@ -17,7 +17,7 @@ export const IDS = {
 /** @deprecated use IDS.m1/m2/m3/m4 */
 export const SPACE_IDS = { space: IDS.m1, space2: IDS.m2 };
 
-export const FLEXIBLE_RULES: FlexibleRules = { ...FLEXIBLE_DEFAULT };
+export const CANCELLATION_RULES: CancellationRules = { ...CANCELLATION_DEFAULT };
 
 export const CUE_LOCATION: LocationPublic = {
   id: IDS.location,
@@ -169,7 +169,7 @@ function makeRoom(opts: {
     // Parking addon removed from the default catalog; see docs/REMOVED_FEATURES.md.
     addons: FEATURES.parkingAddon ? [legacyParkingAddon(opts.parkingAddonId)] : [],
     hostRulesMd: HOST_RULES_MD,
-    cancellationPolicy: { name: "Flexible", rules: FLEXIBLE_RULES },
+    cancellationPolicy: { name: "Standard", rules: CANCELLATION_RULES },
     host: { name: "Darcy Y." },
     addressPrivate: "REDACTED — reveal after accept",
     hostId: IDS.host,

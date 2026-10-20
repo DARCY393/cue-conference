@@ -165,7 +165,10 @@ paths:
     post:
       tags: [Bookings]
       operationId: cancelBooking
-      summary: Cancel after accept; refund per Flexible policy
+      summary: >-
+        Cancel a requested or accepted booking; refund per the Standard 48h
+        policy (release the hold if never captured, full refund if captured
+        ≥48h before start, no refund inside the window)
       security:
         - bearerAuth: []
       parameters:
@@ -206,7 +209,7 @@ paths:
       operationId: listHostBookings
       summary: Host booking queue / calendar list
       security:
-        - bearerAuth: []
+        - staffSession: []
       parameters:
         - name: status
           in: query
@@ -246,7 +249,7 @@ paths:
       operationId: acceptBooking
       summary: Capture PaymentIntent and confirm booking
       security:
-        - bearerAuth: []
+        - staffSession: []
       parameters:
         - $ref: '#/components/parameters/BookingId'
       responses:
@@ -273,7 +276,7 @@ paths:
       operationId: declineBooking
       summary: Cancel PaymentIntent hold and decline
       security:
-        - bearerAuth: []
+        - staffSession: []
       parameters:
         - $ref: '#/components/parameters/BookingId'
       requestBody:
@@ -306,7 +309,7 @@ paths:
       operationId: chargeOvertime
       summary: Off-session PaymentIntent for overtime (30-min steps, 1.5×)
       security:
-        - bearerAuth: []
+        - staffSession: []
       parameters:
         - $ref: '#/components/parameters/BookingId'
       requestBody:
@@ -335,7 +338,7 @@ paths:
       operationId: createBlockout
       summary: Block a time range on a space
       security:
-        - bearerAuth: []
+        - staffSession: []
       requestBody:
         required: true
         content:
@@ -365,7 +368,7 @@ paths:
       operationId: listBlockouts
       summary: List blockouts for a space
       security:
-        - bearerAuth: []
+        - staffSession: []
       parameters:
         - name: spaceId
           in: query
@@ -403,7 +406,7 @@ paths:
       operationId: deleteBlockout
       summary: Remove a blockout
       security:
-        - bearerAuth: []
+        - staffSession: []
       parameters:
         - name: blockoutId
           in: path
@@ -462,18 +465,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /internal/expire-requests:
+    post:
+      tags: [Internal]
+      operationId: expireOverdueRequests
+      summary: >-
+        Cron target: auto-decline "requested" bookings whose 24h host
+        response window has passed, releasing each payment hold
+      security:
+        - cronSecret: []
+      responses:
+        '200':
+          description: Scan complete (0 or more expired)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [expiredCount, expiredIds]
+                properties:
+                  expiredCount:
+                    type: integer
+                  expiredIds:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          description: CRON_SECRET is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Host or authenticated guest
+      description: Authenticated guest
+    staffSession:
+      type: apiKey
+      in: cookie
+      name: cue_staff_session
+      description: Signed, HTTP-only staff session cookie set by POST /staff/login
     guestSession:
       type: apiKey
       in: header
       name: X-Guest-Session
       description: Optional lightweight guest session for checkout
+    cronSecret:
+      type: http
+      scheme: bearer
+      description: CRON_SECRET env var, sent as `Authorization: Bearer <CRON_SECRET>`
 
   parameters:
     Slug:
@@ -739,10 +785,13 @@ components:
       properties:
         name:
           type: string
-          example: Flexible
+          example: Standard
         rules:
           type: object
           additionalProperties: true
+          description: >-
+            Standard policy: free cancellation up to `free_cancellation_hours_before`
+            hours before start (default 48); no refund after that.
 
     AvailabilityBusy:
       type: object
@@ -1025,7 +1074,7 @@ components:
           $ref: '#/components/schemas/MoneyCents'
         refundId:
           type: string
-          description: Stripe refund id when refundCents > 0
+          description: Stripe refund id when a refund was issued
 
     OvertimeRequest:
       type: object

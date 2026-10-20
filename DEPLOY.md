@@ -148,8 +148,19 @@ STRIPE_WEBHOOK_SECRET=whsec_REPLACE_ME
 # is "true", and this file is not where that gets turned on (see §11).
 # ALLOW_STRIPE_LIVE=
 
-# Shared bearer for /host and /api/v1/host/* (see §13 — also lock this down at nginx)
+# Notification "to" address for new-booking host emails — not an auth gate.
 HOST_EMAIL=REPLACE_WITH_STAFF_EMAIL
+
+# Signs the staff session cookie for /host and /api/v1/host/* (see §13).
+# Required — the app refuses to start the staff session system without it
+# once NODE_ENV=production. Generate with:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+SESSION_SECRET=REPLACE_WITH_A_GENERATED_VALUE
+
+# Protects POST /api/v1/internal/expire-requests (see §17). Only needed if
+# that HTTP route is used for the booking-expiry cron instead of (or in
+# addition to) `npm run bookings:expire` run directly on the box.
+# CRON_SECRET=REPLACE_WITH_A_GENERATED_VALUE
 
 # Public app URL — NEXT_PUBLIC_* vars are baked in at `next build` time.
 # If you change this (or any NEXT_PUBLIC_* var) later, you MUST rebuild (§7/§15),
@@ -354,43 +365,31 @@ confirmed shared — do not flip to `live` early.
 
 ## 13. Staff access to `/host`
 
-The `/host` screen and `/api/v1/host/*` currently use a single shared
-`HOST_EMAIL` bearer token — there's no real staff login yet. Until there is,
-put an extra layer in front at nginx: HTTP basic auth (simplest) or an IP
-allowlist.
+`/host` and `/api/v1/host/*` are gated by real staff accounts
+(`staff_users`/`staff_sessions`, migration `012_staff_auth.sql`) — sign-in at
+`/staff/login` sets a signed, HTTP-only session cookie; there's no more
+shared `HOST_EMAIL` bearer token. Passwords are hashed with `scrypt`
+(`lib/password.ts`); nothing plaintext is ever stored.
 
-Basic auth example, added inside the `server { }` block from §9:
-
-```nginx
-location /host {
-    auth_basic "Cue staff";
-    auth_basic_user_file /etc/nginx/.htpasswd-cue-host;
-    proxy_pass http://127.0.0.1:3100;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-
-location /api/v1/host/ {
-    auth_basic "Cue staff";
-    auth_basic_user_file /etc/nginx/.htpasswd-cue-host;
-    proxy_pass http://127.0.0.1:3100;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-```
-
-Generate the credentials file:
+Create D'Arcy's account (and any other staff) directly on the box, after
+migrations have run and `SESSION_SECRET` is set in `/etc/cue-conference.env`:
 
 ```bash
-sudo apt install -y apache2-utils
-sudo htpasswd -c /etc/nginx/.htpasswd-cue-host darcy
-sudo nginx -t && sudo systemctl reload nginx
+cd /srv/cue-conference
+sudo -u cue env $(grep -v '^#' /etc/cue-conference.env | xargs -d '\n') \
+  STAFF_EMAIL=darcy@thecue.work STAFF_NAME="D'Arcy" \
+  npm run staff:create
+# prompts for a password without echoing it; rerun any time to reset one
 ```
 
-(IP allowlisting via `allow`/`deny` directives is the alternative if staff
-only ever connect from known IPs/VPN.)
+Don't set `STAFF_PASSWORD` on the command line or in `/etc/cue-conference.env`
+— let it prompt, so the password never lands in shell history or a file.
+
+This is the whole gate now; no extra nginx basic-auth/IP allowlist layer is
+required in front of `/host`. If you still want defense in depth (e.g. staff
+only ever connect from a known VPN), an `allow`/`deny` IP allowlist on
+`location /host { }` and `location /api/v1/host/ { }` is a reasonable
+addition, but it's optional.
 
 ## 14. Linking/embedding from thecue.work
 
@@ -465,8 +464,8 @@ manual SQL step, not part of this script.)
 - [ ] Pay with Stripe test card `4242 4242 4242 4242` — Payment Element
       confirms (or, if no Stripe keys are set yet, the mock-hold alert shows
       instead and the booking still completes)
-- [ ] `/host` requires the basic-auth/IP gate from §13, then the app's own
-      `HOST_EMAIL` bearer
+- [ ] `/host` redirects to `/staff/login` when signed out, and signing in
+      with the staff account from §13 reaches the host queue
 - [ ] Host queue shows the new request with room/guest/time (America/Chicago)/total
 - [ ] **Accept** captures the PaymentIntent (check Stripe dashboard test mode)
       and, once Google Calendar is live, creates a calendar event on the room's calendar
@@ -475,3 +474,32 @@ manual SQL step, not part of this script.)
 - [ ] Stripe webhook endpoint shows successful deliveries (test mode dashboard)
 - [ ] `?embed=1` on a room page hides header/footer and renders compactly
 - [ ] iframe test page on a `thecue.work`-origin host actually loads the embed (not blocked by CSP)
+
+## 17. Booking-expiry cron
+
+Requests the host doesn't accept/decline within 24h must auto-decline and
+release their payment hold (`expireOverdueRequests()` in `lib/bookings.ts`).
+This also happens lazily whenever the host queue is read, so the cron is a
+backstop for requests no one ever looks at — not the only thing keeping
+expiry timely.
+
+Run it directly on the box (simplest — no `CRON_SECRET` needed since it
+doesn't go over HTTP):
+
+```bash
+sudo -u cue crontab -e
+# add:
+# */15 * * * * cd /srv/cue-conference && /usr/bin/env $(grep -v '^#' /etc/cue-conference.env | xargs -d '\n') npm run bookings:expire >> /var/log/cue-conference-expire.log 2>&1
+```
+
+Alternative — hit the HTTP route instead (e.g. from a monitoring box that
+isn't the app server itself). Requires `CRON_SECRET` set in
+`/etc/cue-conference.env` (§6):
+
+```bash
+*/15 * * * * curl -fsS -X POST https://book.thecue.work/api/v1/internal/expire-requests \
+  -H "Authorization: Bearer REPLACE_WITH_CRON_SECRET"
+```
+
+Either path is idempotent and safe to run as often as you like — pick one,
+not both, to avoid double log noise.

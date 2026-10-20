@@ -6,13 +6,13 @@ function trimmedEnv(name: string): string {
   return (process.env[name] || "").trim();
 }
 
-/** Test-mode-only: true only for a real-looking sk_test_… secret key. Live keys never count. */
+/** Test-mode-only: true only for a real-looking sk_test_… or restricted rk_test_… key. Live keys never count. */
 export function hasStripe(): boolean {
   const key = trimmedEnv("STRIPE_SECRET_KEY");
   if (!key) return false;
   // Treat .env.example placeholders as unset
   if (key.includes("...") || key.endsWith("_here") || key === "sk_test_") return false;
-  return key.startsWith("sk_test_");
+  return key.startsWith("sk_test_") || key.startsWith("rk_test_");
 }
 
 function isLiveKeyConfigured(): boolean {

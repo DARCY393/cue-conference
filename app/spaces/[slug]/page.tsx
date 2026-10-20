@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, MouseEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   Elements,
@@ -15,10 +15,15 @@ import HouseRules from "@/components/HouseRules";
 import { AmenityTile } from "@/components/ui/AmenityTile";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
-import { Button } from "@/components/ui/Button";
+import { Button, buttonClasses } from "@/components/ui/Button";
 import { formatMoney, formatRate, roomCode } from "@/lib/format";
 
 const money = formatMoney;
+
+/** Breaks a section out of the centered page container to span the full viewport width. */
+function FullBleed({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <div className={`relative left-1/2 w-screen -translate-x-1/2 ${className}`}>{children}</div>;
+}
 
 /** Next weekday (Mon–Fri) on or after today, read in America/Chicago, as a yyyy-mm-dd date-input value. */
 function nextWeekdayChicago(): string {
@@ -44,7 +49,7 @@ function nextWeekdayChicago(): string {
 
 function RoomPlaceholder({ code, capacity }: { code: string; capacity: number }) {
   return (
-    <div className="flex h-60 w-full flex-col items-center justify-center gap-1 bg-cue-stone-100">
+    <div className="flex h-72 w-full flex-col items-center justify-center gap-1 bg-cue-stone-100 sm:h-96">
       <span className="font-display text-5xl text-cue-navy-600">{code}</span>
       <span className="text-sm text-cue-stone-500">{capacity} seats</span>
     </div>
@@ -77,7 +82,7 @@ function RoomGallery({ space }: { space: SpacePublic }) {
         <img
           src={activePhoto.url}
           alt={activePhoto.alt || space.title}
-          className="h-60 w-full object-cover"
+          className="h-72 w-full object-cover sm:h-96"
           onError={() => setErrored((e) => ({ ...e, [activeIndex]: true }))}
         />
       ) : (
@@ -409,28 +414,52 @@ export default function SpacePage() {
 
   const fieldsLocked = !!hold;
 
+  const discountPct = space.pricing.longBookingDiscountBps / 100;
+
   return (
-    <div className="grid gap-8 lg:grid-cols-5">
-      <section className="lg:col-span-3 space-y-6">
-        <div className="cue-card overflow-hidden">
-          <RoomGallery space={space} />
-          <div className="space-y-5 p-6 sm:p-8">
-            <div className="flex items-start justify-between gap-4">
+    <>
+      {/* Hero */}
+      <FullBleed className="-mt-10 bg-cue-navy-700">
+        <div className="mx-auto max-w-[920px] px-4 py-16 sm:px-6 sm:py-24">
+          <p className="cue-eyebrow text-cue-copper-300">
+            {space.location ? `${space.location.city} · ${space.location.name}` : space.city}
+          </p>
+          <h1 className="mt-3 max-w-xl text-[clamp(32px,4.2vw,48px)] text-white">{space.title}</h1>
+          <p className="mt-4 flex items-center gap-1.5 text-white/85">
+            <Users aria-hidden className="h-4 w-4" />
+            {space.capacity} seats · {space.location?.name ?? space.city}
+          </p>
+          <p className="mt-1 text-lg text-white/90">
+            {formatRate(space.pricing.baseHourlyCents)} / hr · {space.pricing.minHours}-hr minimum
+          </p>
+          {discountPct > 0 && (
+            <p className="mt-1 text-sm text-cue-copper-300">
+              {discountPct}% off {space.pricing.longBookingThresholdHours}+ hours
+            </p>
+          )}
+          <a href="#booking" className={buttonClasses("accent", "mt-8 inline-flex rounded-full px-8")}>
+            Reserve
+          </a>
+        </div>
+      </FullBleed>
+
+      {/* Gallery + about + amenities */}
+      <FullBleed className="bg-white">
+        <div className="mx-auto max-w-[920px] space-y-10 px-4 py-14 sm:px-6">
+          <div className="overflow-hidden rounded-card shadow-sm">
+            <RoomGallery space={space} />
+          </div>
+
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h1 className="text-3xl">{space.title}</h1>
-                <p className="mt-1 flex items-center gap-1.5 text-cue-stone-500">
-                  <Users aria-hidden className="h-4 w-4" />
-                  {space.capacity} seats · {space.location?.name ?? space.city}
+                <h2 className="text-2xl">About {roomCode(space)}</h2>
+                <p className="mt-2 max-w-2xl text-sm leading-relaxed text-cue-stone-700">
+                  {space.description}
                 </p>
               </div>
-              <div className="shrink-0 rounded-tile bg-cue-navy-050 px-3 py-2 text-right">
-                <div className="text-lg font-semibold text-cue-navy-600">
-                  {formatRate(space.pricing.baseHourlyCents)}
-                </div>
-                <div className="text-xs text-cue-stone-500">per hour</div>
-              </div>
+              <Badge tone="navy">Request to book</Badge>
             </div>
-            <p className="text-sm leading-relaxed text-cue-stone-700">{space.description}</p>
             <div className="flex flex-wrap gap-2">
               <span className="cue-chip">
                 <MapPin aria-hidden className="mr-1.5 h-3.5 w-3.5" />
@@ -442,38 +471,31 @@ export default function SpacePage() {
                 <Clock aria-hidden className="mr-1.5 h-3.5 w-3.5" />
                 Mon–Fri 7:00–18:00 ({space.timezone})
               </span>
-              <Badge tone="navy">Request to book</Badge>
             </div>
             {space.amenities.length > 0 && (
               <div>
-                <h2 className="mb-3 text-sm font-semibold text-cue-navy-600">Amenities</h2>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <h3 className="mb-3 text-sm font-semibold text-cue-navy-600">Amenities</h3>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {space.amenities.map((a) => (
                     <AmenityTile key={a.key} amenityKey={a.key} label={a.label} />
                   ))}
                 </div>
               </div>
             )}
-            {space.hostRulesMd && <HouseRules markdown={space.hostRulesMd} />}
-            {space.cancellationPolicy && (
-              <p className="text-xs text-cue-stone-500">
-                Cancellation: <strong className="text-cue-stone-700">{space.cancellationPolicy.name}</strong> —
-                full refund ≥7 days before; 50% ≥24h before; grace within 24h of confirm if
-                start ≥48h away.
-              </p>
-            )}
           </div>
         </div>
-      </section>
+      </FullBleed>
 
-      <section className="lg:col-span-2">
-        <form
-          noValidate
-          onSubmit={createHold}
-          className="cue-card sticky top-[6.5rem] space-y-4 p-6"
-        >
+      {/* Booking */}
+      <FullBleed className="bg-cue-stone-100">
+        <div id="booking" className="mx-auto max-w-[760px] scroll-mt-24 px-4 py-14 sm:px-6">
+          <form
+            noValidate
+            onSubmit={createHold}
+            className="cue-card space-y-4 p-6 sm:p-8"
+          >
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-2xl">Request a booking</h2>
+            <h2 className="text-2xl">Reserve {roomCode(space)}</h2>
             {isTestOrMockStripe && <Badge tone="warning">Test mode</Badge>}
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -624,15 +646,20 @@ export default function SpacePage() {
           </label>
           {error && <Alert tone="danger">{error}</Alert>}
           {!hold ? (
-            <Button
-              type="button"
-              variant="accent"
-              fullWidth
-              onClick={(e) => void createHold(e)}
-              disabled={submitting || !quote}
-            >
-              {submitting ? "Placing hold…" : "Continue to payment"}
-            </Button>
+            <>
+              <p className="text-xs text-cue-stone-500">
+                Free cancellation up to 48 hours before your booking. No refund after that.
+              </p>
+              <Button
+                type="button"
+                variant="accent"
+                fullWidth
+                onClick={(e) => void createHold(e)}
+                disabled={submitting || !quote}
+              >
+                {submitting ? "Placing hold…" : "Continue to payment"}
+              </Button>
+            </>
           ) : (
             <div data-testid="hold-panel" className="space-y-3 border-t border-cue-stone-200 pt-4">
               <div className="flex items-center justify-between gap-2">
@@ -644,9 +671,14 @@ export default function SpacePage() {
                   {quote ? money(quote.totalCents) : ""}
                 </span>
               </div>
+              <p className="text-xs text-cue-stone-500">
+                Staff respond within 24 hours; if not, your hold is released automatically. Free
+                cancellation up to 48 hours before your booking — no refund after that.
+              </p>
               {paymentMessage ? (
                 <Alert tone="success" title="Payment confirmed">
-                  {paymentMessage}
+                  {paymentMessage} Free cancellation up to 48 hours before your booking; no refund
+                  after that.
                 </Alert>
               ) : isMockSecret(hold.clientSecret) ? (
                 <p className="text-sm text-cue-stone-600">
@@ -692,7 +724,24 @@ export default function SpacePage() {
             </div>
           )}
         </form>
-      </section>
-    </div>
+        </div>
+      </FullBleed>
+
+      {/* House rules, billing & cancellation */}
+      {(space.hostRulesMd || space.cancellationPolicy) && (
+        <FullBleed className="-mb-10 bg-cue-paper">
+          <div className="mx-auto max-w-[920px] space-y-4 px-4 py-14 sm:px-6">
+            {space.hostRulesMd && <HouseRules markdown={space.hostRulesMd} />}
+            {space.cancellationPolicy && (
+              <p className="text-xs text-cue-stone-500">
+                Cancellation: <strong className="text-cue-stone-700">{space.cancellationPolicy.name}</strong> —
+                free cancellation up to 48 hours before your booking; no refund after that. Staff
+                respond within 24 hours; if not, your hold is released automatically.
+              </p>
+            )}
+          </div>
+        </FullBleed>
+      )}
+    </>
   );
 }

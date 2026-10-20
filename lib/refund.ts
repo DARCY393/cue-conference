@@ -1,90 +1,68 @@
-import type { FlexibleRules } from "./types";
+import type { CancellationRules } from "./types";
 
 export interface RefundInput {
   now: Date;
   startsAt: Date;
-  /** When the booking was accepted / confirmed (decidedAt). */
-  confirmedAt: Date;
   totalCents: number;
-  feesCents: number;
-  rules: FlexibleRules;
+  /** Was the hold ever captured, i.e. did staff accept before the guest cancelled? */
+  captured: boolean;
+  rules: CancellationRules;
 }
+
+export type CancellationAction = "release_hold" | "refund" | "no_refund";
 
 export interface RefundResult {
   refundCents: number;
-  tier: "grace_full" | "full" | "partial" | "none";
+  action: CancellationAction;
   reason: string;
 }
 
 const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
 
 /**
- * Flexible cancellation refund calculator.
+ * Standard cancellation policy (non-member bookings): free cancellation up to
+ * `free_cancellation_hours_before` hours before start; no refund after that.
  *
+ * The hold-vs-capture distinction matters independently of that cutoff: an
+ * uncaptured PaymentIntent never actually charged the guest, so "no refund"
+ * there means releasing the authorization hold, not keeping captured funds.
  * Priority:
- * 1. Grace: within grace_hours_after_confirm of confirm AND start is still
- *    grace_requires_hours_before_start away → 100% of total
- * 2. Full: cancelled at least full_refund_days_before days before start → 100%
- * 3. Partial: cancelled at least partial_refund_hours_before hours before start
- *    → partial_refund_bps of (total − fees if partial_excludes_fees else total)
- * 4. Else → 0
+ * 1. Not captured (staff never accepted) → release the hold. Nothing was
+ *    charged, so there's nothing to refund either way.
+ * 2. Captured and ≥ free_cancellation_hours_before away → full refund.
+ * 3. Captured and inside the window → no refund.
  */
-export function calculateFlexibleRefund(input: RefundInput): RefundResult {
-  const { now, startsAt, confirmedAt, totalCents, feesCents, rules } = input;
+export function calculateCancellationRefund(input: RefundInput): RefundResult {
+  const { now, startsAt, totalCents, captured, rules } = input;
 
-  if (totalCents < 0 || feesCents < 0 || feesCents > totalCents) {
-    throw new Error("Invalid money amounts");
+  if (totalCents < 0) {
+    throw new Error("Invalid money amount");
   }
 
-  const hoursAfterConfirm = (now.getTime() - confirmedAt.getTime()) / HOUR_MS;
+  if (!captured) {
+    return {
+      refundCents: 0,
+      action: "release_hold",
+      reason: "Booking was never accepted — releasing the uncaptured payment hold.",
+    };
+  }
+
   const hoursBeforeStart = (startsAt.getTime() - now.getTime()) / HOUR_MS;
-  const daysBeforeStart = (startsAt.getTime() - now.getTime()) / DAY_MS;
-
-  if (
-    hoursAfterConfirm >= 0 &&
-    hoursAfterConfirm <= rules.grace_hours_after_confirm &&
-    hoursBeforeStart >= rules.grace_requires_hours_before_start
-  ) {
+  if (hoursBeforeStart >= rules.free_cancellation_hours_before) {
     return {
       refundCents: totalCents,
-      tier: "grace_full",
-      reason: `Grace period: cancelled within ${rules.grace_hours_after_confirm}h of confirmation with ≥${rules.grace_requires_hours_before_start}h until start`,
-    };
-  }
-
-  if (daysBeforeStart >= rules.full_refund_days_before) {
-    return {
-      refundCents: totalCents,
-      tier: "full",
-      reason: `Full refund: ≥${rules.full_refund_days_before} days before start`,
-    };
-  }
-
-  if (hoursBeforeStart >= rules.partial_refund_hours_before) {
-    const base = rules.partial_excludes_fees
-      ? Math.max(0, totalCents - feesCents)
-      : totalCents;
-    const refundCents = Math.floor((base * rules.partial_refund_bps) / 10000);
-    return {
-      refundCents,
-      tier: "partial",
-      reason: `Partial refund (${rules.partial_refund_bps / 100}%) with ≥${rules.partial_refund_hours_before}h before start`,
+      action: "refund",
+      reason: `Free cancellation: ≥${rules.free_cancellation_hours_before}h before start.`,
     };
   }
 
   return {
     refundCents: 0,
-    tier: "none",
-    reason: `No refund: less than ${rules.partial_refund_hours_before}h before start`,
+    action: "no_refund",
+    reason: `No refund: less than ${rules.free_cancellation_hours_before}h before start.`,
   };
 }
 
-export const FLEXIBLE_DEFAULT: FlexibleRules = {
-  full_refund_days_before: 7,
-  partial_refund_hours_before: 24,
-  partial_refund_bps: 5000,
-  partial_excludes_fees: true,
-  grace_hours_after_confirm: 24,
-  grace_requires_hours_before_start: 48,
+export const CANCELLATION_DEFAULT: CancellationRules = {
+  free_cancellation_hours_before: 48,
 };

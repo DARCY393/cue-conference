@@ -7,22 +7,22 @@ import { Mail, MapPin, Phone } from "lucide-react";
 
 function SiteHeader() {
   return (
-    <header className="sticky top-0 z-40 h-[74px] border-b border-cue-stone-200 bg-[rgba(250,248,245,0.92)] backdrop-blur-[10px]">
+    <header className="sticky top-0 z-40 h-[74px] border-b border-white/10 bg-cue-navy-700/95 backdrop-blur-[10px]">
       <div className="mx-auto flex h-full max-w-5xl items-center justify-between gap-4 px-4 sm:px-6">
         <a href="https://thecue.work" className="flex items-center" aria-label="Cue — thecue.work">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/branding/logo-cue-navy.png" alt="Cue" className="h-7 w-auto" />
+          <img src="/branding/logo-cue-light.png" alt="Cue" className="h-7 w-auto" />
         </a>
-        <nav className="flex items-center gap-6 text-sm font-medium text-cue-stone-700">
-          <Link href="/spaces/arts-district-m1" className="no-underline hover:text-cue-navy-600">
+        <nav className="flex items-center gap-6 text-sm font-medium text-white/80">
+          <Link href="/spaces/arts-district-m1" className="no-underline hover:text-white">
             Book a room
           </Link>
-          <Link href="/host" className="no-underline hover:text-cue-navy-600">
+          <Link href="/host" className="no-underline hover:text-white">
             Host
           </Link>
           <a
             href="https://thecue.work"
-            className="hidden no-underline text-cue-stone-500 hover:text-cue-navy-600 sm:inline"
+            className="hidden no-underline text-white/60 hover:text-white sm:inline"
           >
             thecue.work
           </a>

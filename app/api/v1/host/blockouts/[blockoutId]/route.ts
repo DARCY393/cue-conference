@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireHost } from "@/lib/auth";
+import { requireStaff } from "@/lib/staff-auth";
 import { jsonError } from "@/lib/http";
 import { getStore, isDemoMode } from "@/lib/store";
 import { query } from "@/lib/db";
@@ -9,7 +9,7 @@ export async function DELETE(
   req: NextRequest,
   ctx: { params: Promise<{ blockoutId: string }> }
 ) {
-  const auth = requireHost(req);
+  const auth = await requireStaff(req);
   if (!auth.ok) return jsonError(auth.status, auth.error, auth.message);
   const { blockoutId } = await ctx.params;
 

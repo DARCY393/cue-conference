@@ -3,6 +3,25 @@ import { CUE_SPACES, HOST_EMAIL_DEFAULT, IDS, resolveLegacySpaceSlug } from "./s
 import type { Booking, Blockout, BusyInterval, SpacePublic } from "./types";
 import { toPublicSpaceJson } from "./space-public";
 
+export interface StaffUserRecord {
+  id: string;
+  email: string;
+  name: string;
+  passwordHash: string;
+  role: string;
+  active: boolean;
+  createdAt: string;
+  lastLoginAt?: string;
+}
+
+export interface StaffSessionRecord {
+  id: string;
+  staffUserId: string;
+  tokenHash: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
 /** Process-wide in-memory demo store (used when DATABASE_URL is absent). */
 class MemoryStore {
   spaces: SpacePublic[] = CUE_SPACES.map((s) => structuredClone(s));
@@ -18,6 +37,8 @@ class MemoryStore {
     stripeObjectId?: string;
     idempotencyKey?: string;
   }[] = [];
+  staffUsers: StaffUserRecord[] = [];
+  staffSessions: StaffSessionRecord[] = [];
 
   /** @deprecated use spaces[0] — kept for older call sites */
   get space(): SpacePublic {
@@ -158,6 +179,62 @@ class MemoryStore {
     if (i < 0) return false;
     this.blockouts.splice(i, 1);
     return true;
+  }
+
+  /** Upserts one staff account by lowercased email. Used only by the `staff:create` CLI. */
+  upsertStaffUser(input: {
+    email: string;
+    name: string;
+    passwordHash: string;
+    role?: string;
+  }): StaffUserRecord {
+    const email = input.email.toLowerCase();
+    const existing = this.staffUsers.find((u) => u.email === email);
+    if (existing) {
+      existing.name = input.name;
+      existing.passwordHash = input.passwordHash;
+      if (input.role) existing.role = input.role;
+      existing.active = true;
+      return existing;
+    }
+    const user: StaffUserRecord = {
+      id: randomUUID(),
+      email,
+      name: input.name,
+      passwordHash: input.passwordHash,
+      role: input.role || "admin",
+      active: true,
+      createdAt: new Date().toISOString(),
+    };
+    this.staffUsers.push(user);
+    return user;
+  }
+
+  findStaffUserByEmail(email: string): StaffUserRecord | undefined {
+    return this.staffUsers.find((u) => u.email === email.toLowerCase());
+  }
+
+  findStaffUserById(id: string): StaffUserRecord | undefined {
+    return this.staffUsers.find((u) => u.id === id);
+  }
+
+  touchStaffLogin(id: string): void {
+    const user = this.findStaffUserById(id);
+    if (user) user.lastLoginAt = new Date().toISOString();
+  }
+
+  createStaffSession(session: StaffSessionRecord): StaffSessionRecord {
+    this.staffSessions.push(session);
+    return session;
+  }
+
+  findStaffSessionByTokenHash(tokenHash: string): StaffSessionRecord | undefined {
+    return this.staffSessions.find((s) => s.tokenHash === tokenHash);
+  }
+
+  deleteStaffSessionByTokenHash(tokenHash: string): void {
+    const i = this.staffSessions.findIndex((s) => s.tokenHash === tokenHash);
+    if (i >= 0) this.staffSessions.splice(i, 1);
   }
 }
 

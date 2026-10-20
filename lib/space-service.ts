@@ -2,7 +2,7 @@ import { CUE_SPACE, CUE_SPACES, CUE_LOCATIONS, IDS, resolveLegacySpaceSlug } fro
 import { getStore, isDemoMode } from "./store";
 import { query } from "./db";
 import type { BusyInterval, LocationPublic, SpacePublic } from "./types";
-import { FLEXIBLE_RULES } from "./seed";
+import { CANCELLATION_RULES } from "./seed";
 import { toPublicSpaceJson } from "./space-public";
 
 type SpaceRow = {
@@ -136,9 +136,9 @@ async function hydrateSpace(s: SpaceRow): Promise<SpacePublic> {
     cancellationPolicy: s.policy_name
       ? {
           name: s.policy_name,
-          rules: (s.rules_json as import("./types").FlexibleRules) ?? FLEXIBLE_RULES,
+          rules: (s.rules_json as import("./types").CancellationRules) ?? CANCELLATION_RULES,
         }
-      : { name: "Flexible", rules: FLEXIBLE_RULES },
+      : { name: "Standard", rules: CANCELLATION_RULES },
     approxLocation:
       s.approx_lat != null && s.approx_lng != null
         ? { lat: s.approx_lat, lng: s.approx_lng }

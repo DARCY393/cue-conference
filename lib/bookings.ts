@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { calculateQuote, calculateOvertimeCents, computeAddonCents } from "./quote";
-import { calculateFlexibleRefund, FLEXIBLE_DEFAULT } from "./refund";
+import { calculateCancellationRefund, CANCELLATION_DEFAULT } from "./refund";
 import { expandDayWindows, isAvailable, totalWindowHours } from "./availability";
 import { getBusy, getSpaceById } from "./space-service";
 import { getStore, isDemoMode } from "./store";
@@ -18,6 +18,11 @@ import type { Booking, QuoteAddonInput, SpacePublic } from "./types";
 import { IDS } from "./seed";
 
 const HOST_ACTION_HOURS = 24;
+
+/** Shown to guests at request/accept time and echoed into email payloads. */
+const CANCELLATION_POLICY_NOTE =
+  "Free cancellation up to 48 hours before your booking. No refund after that. " +
+  "Staff respond within 24 hours; if not, your hold is released automatically.";
 
 function toBookingPublic(b: Booking, space?: SpacePublic | null): Booking {
   const out = { ...b };
@@ -214,7 +219,7 @@ export async function createBookingRequest(body: {
       to: body.guest.email,
       template: "booking_requested",
       subject: `Request sent for ${space.title}`,
-      payload: { bookingId: booking.id },
+      payload: { bookingId: booking.id, policyNote: CANCELLATION_POLICY_NOTE },
     });
     await getEmailSender().send({
       to: process.env.HOST_EMAIL || "host@example.com",
@@ -361,31 +366,37 @@ export async function cancelBooking(
   void reason;
   const booking = await getBookingById(id);
   if (!booking) return { error: "not_found", message: "Booking not found", status: 404 };
-  if (booking.status !== "accepted") {
+  if (!["requested", "accepted"].includes(booking.status)) {
     return {
       error: "invalid_status",
-      message: "Only accepted bookings can be cancelled via this endpoint",
+      message: "Only requested or accepted bookings can be cancelled via this endpoint",
       status: 409,
     };
   }
   const space = await getSpaceById(booking.spaceId);
-  const rules = space?.cancellationPolicy?.rules ?? FLEXIBLE_DEFAULT;
-  const result = calculateFlexibleRefund({
+  const rules = space?.cancellationPolicy?.rules ?? CANCELLATION_DEFAULT;
+  // "accepted" means staff captured the PaymentIntent (see acceptBooking) —
+  // anything still "requested" was never charged, only authorized.
+  const captured = booking.status === "accepted";
+  const result = calculateCancellationRefund({
     now: new Date(),
     startsAt: new Date(booking.startsAt),
-    confirmedAt: new Date(booking.decidedAt || booking.createdAt),
     totalCents: booking.totalCents,
-    feesCents: booking.feesCents,
+    captured,
     rules,
   });
 
   let refundId: string | undefined;
-  if (result.refundCents > 0 && booking.stripePaymentIntentId) {
-    const refund = await createRefund({
-      paymentIntentId: booking.stripePaymentIntentId,
-      amountCents: result.refundCents,
-    });
-    refundId = refund.id;
+  if (booking.stripePaymentIntentId) {
+    if (result.action === "release_hold") {
+      await cancelPaymentIntent(booking.stripePaymentIntentId);
+    } else if (result.action === "refund") {
+      const refund = await createRefund({
+        paymentIntentId: booking.stripePaymentIntentId,
+        amountCents: result.refundCents,
+      });
+      refundId = refund.id;
+    }
   }
 
   const cancelledAt = new Date().toISOString();
@@ -405,9 +416,89 @@ export async function cancelBooking(
     to: booking.guestEmail || "guest@example.com",
     template: "booking_cancelled",
     subject: "Booking cancelled",
-    payload: { bookingId: id, refundCents: result.refundCents, tier: result.tier },
+    payload: { bookingId: id, refundCents: result.refundCents, action: result.action },
   });
   return { booking: updated, refundCents: result.refundCents, refundId };
+}
+
+/**
+ * Idempotent: expires a single still-"requested" booking whose host response
+ * window has passed, releasing its payment hold. A no-op (returns an error
+ * result) if the booking has already moved on — safe to call repeatedly from
+ * both the bulk scan below and any retry.
+ */
+export async function expireBookingRequest(id: string) {
+  const booking = await getBookingById(id);
+  if (!booking || booking.status !== "requested") {
+    return {
+      error: "invalid_status" as const,
+      message: "Booking is not a pending request",
+      status: 409,
+    };
+  }
+  if (!booking.hostActionDeadlineAt || new Date(booking.hostActionDeadlineAt) > new Date()) {
+    return {
+      error: "not_overdue" as const,
+      message: "Host response window has not passed yet",
+      status: 409,
+    };
+  }
+  if (booking.stripePaymentIntentId) {
+    await cancelPaymentIntent(booking.stripePaymentIntentId);
+  }
+  const decidedAt = new Date().toISOString();
+  if (isDemoMode()) {
+    getStore().updateBooking(id, { status: "expired", decidedAt });
+  } else {
+    await query(
+      `UPDATE bookings SET status = 'expired', decided_at = $2 WHERE id = $1 AND status = 'requested'`,
+      [id, decidedAt]
+    );
+  }
+  const updated = (await getBookingById(id))!;
+  await getEmailSender().send({
+    to: booking.guestEmail || "guest@example.com",
+    template: "booking_expired",
+    subject: "Your booking request expired",
+    payload: {
+      bookingId: id,
+      reason: "Staff did not respond within 24 hours — your payment hold has been released.",
+    },
+  });
+  return { booking: updated };
+}
+
+/**
+ * Scans for "requested" bookings whose `hostActionDeadlineAt` (set to
+ * HOST_ACTION_HOURS after the request) has passed and auto-declines them,
+ * releasing each payment hold. Called by the cron-protected internal route,
+ * the `bookings:expire` script, and lazily on every host booking list read.
+ */
+export async function expireOverdueRequests(): Promise<{ expiredIds: string[] }> {
+  const now = new Date();
+  let candidateIds: string[];
+  if (isDemoMode()) {
+    candidateIds = getStore()
+      .bookings.filter(
+        (b) =>
+          b.status === "requested" &&
+          b.hostActionDeadlineAt &&
+          new Date(b.hostActionDeadlineAt) <= now
+      )
+      .map((b) => b.id);
+  } else {
+    const { rows } = await query<{ id: string }>(
+      `SELECT id FROM bookings WHERE status = 'requested' AND host_action_deadline_at <= now()`
+    );
+    candidateIds = rows.map((r) => String(r.id));
+  }
+
+  const expiredIds: string[] = [];
+  for (const id of candidateIds) {
+    const result = await expireBookingRequest(id);
+    if ("booking" in result) expiredIds.push(id);
+  }
+  return { expiredIds };
 }
 
 export async function acceptBooking(id: string) {
@@ -484,7 +575,7 @@ export async function acceptBooking(id: string) {
     to: booking.guestEmail || "guest@example.com",
     template: "booking_accepted",
     subject: "Your booking was accepted",
-    payload: { bookingId: id },
+    payload: { bookingId: id, policyNote: CANCELLATION_POLICY_NOTE },
   });
   return { booking: updated, calendarSyncWarning };
 }
@@ -572,6 +663,7 @@ export async function listHostBookings(opts: {
   from?: string;
   to?: string;
 }) {
+  await expireOverdueRequests();
   if (isDemoMode()) {
     return getStore().listHostBookings(opts);
   }

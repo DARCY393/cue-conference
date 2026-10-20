@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Booking, Blockout, SpacePublic } from "@/lib/types";
+import { useRouter } from "next/navigation";
+import type { Booking, Blockout, SpacePublic, StaffUser } from "@/lib/types";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { Button, buttonClasses } from "@/components/ui/Button";
@@ -35,7 +36,9 @@ function holdStatus(status: string): { label: string; tone: BadgeTone } {
 }
 
 export default function HostPage() {
-  const [hostEmail, setHostEmail] = useState("host@example.com");
+  const router = useRouter();
+  const [staff, setStaff] = useState<StaffUser | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [blockouts, setBlockouts] = useState<Blockout[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -49,15 +52,29 @@ export default function HostPage() {
     null
   );
 
-  const headers = useCallback(
-    () => ({
-      Authorization: `Bearer ${hostEmail}`,
-      "Content-Type": "application/json",
-    }),
-    [hostEmail]
-  );
+  const headers = useCallback(() => ({ "Content-Type": "application/json" }), []);
 
   useEffect(() => {
+    fetch("/api/v1/staff/me")
+      .then(async (r) => {
+        if (!r.ok) {
+          router.replace("/staff/login?next=/host");
+          return;
+        }
+        const data = await r.json();
+        setStaff(data.staff);
+      })
+      .catch(() => router.replace("/staff/login?next=/host"))
+      .finally(() => setCheckingAuth(false));
+  }, [router]);
+
+  async function signOut() {
+    await fetch("/api/v1/staff/logout", { method: "POST" });
+    router.replace("/staff/login");
+  }
+
+  useEffect(() => {
+    if (!staff) return;
     fetch("/api/v1/spaces")
       .then(async (r) => {
         const data = await r.json();
@@ -67,9 +84,10 @@ export default function HostPage() {
         setBlockoutSpaceId((prev) => prev || liveSpaces[0]?.id || "");
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Load failed"));
-  }, []);
+  }, [staff]);
 
   const load = useCallback(async () => {
+    if (!staff) return;
     setError(null);
     try {
       const spaceId = blockoutSpaceId;
@@ -82,6 +100,10 @@ export default function HostPage() {
             })
           : Promise.resolve(null),
       ]);
+      if (bRes.status === 401) {
+        router.replace("/staff/login?next=/host");
+        return;
+      }
       const bData = await bRes.json();
       if (!bRes.ok) throw new Error(bData.message || "Failed to load bookings");
       setBookings(bData.data);
@@ -93,7 +115,7 @@ export default function HostPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     }
-  }, [headers, statusFilter, blockoutSpaceId]);
+  }, [headers, statusFilter, blockoutSpaceId, staff, router]);
 
   useEffect(() => {
     void load();
@@ -154,6 +176,13 @@ export default function HostPage() {
     await load();
   }
 
+  if (checkingAuth) {
+    return <p className="text-cue-stone-500">Checking sign-in…</p>;
+  }
+  if (!staff) {
+    return null;
+  }
+
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -161,19 +190,12 @@ export default function HostPage() {
           <p className="cue-eyebrow">Staff</p>
           <h1 className="mt-2 text-3xl">Host queue</h1>
           <p className="mt-1 text-sm text-cue-stone-500">
-            Sign in with the <code className="rounded bg-cue-stone-100 px-1.5 py-0.5 text-cue-navy-600">HOST_EMAIL</code>{" "}
-            bearer token (default host@example.com).
+            Signed in as <span className="text-cue-navy-600">{staff.name}</span> ({staff.email})
           </p>
         </div>
-        <label className="text-sm">
-          <span className="text-cue-stone-500">Host email</span>
-          <input
-            value={hostEmail}
-            onChange={(e) => setHostEmail(e.target.value)}
-            className="cue-input w-auto min-w-[14rem]"
-            aria-label="Host email"
-          />
-        </label>
+        <Button type="button" variant="secondary" onClick={() => void signOut()}>
+          Sign out
+        </Button>
       </div>
 
       {error && <Alert tone="danger">{error}</Alert>}

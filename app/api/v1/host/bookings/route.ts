@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { listHostBookings, sanitizeBookingForApi } from "@/lib/bookings";
-import { requireHost } from "@/lib/auth";
+import { requireStaff } from "@/lib/staff-auth";
 import { jsonError, jsonOk } from "@/lib/http";
 
 export async function GET(req: NextRequest) {
-  const auth = requireHost(req);
+  const auth = await requireStaff(req);
   if (!auth.ok) return jsonError(auth.status, auth.error, auth.message);
 
   const status = req.nextUrl.searchParams.get("status") ?? undefined;
