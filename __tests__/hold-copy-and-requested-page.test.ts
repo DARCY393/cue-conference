@@ -188,7 +188,7 @@ describe("requested page + public API (demo mode)", () => {
     expect(html).toContain("Wed, Jan 6, 2027");
     expect(html).toContain("9:00 AM – 5:00 PM CT");
     expect(html).toContain("8 hrs");
-    expect(html).toContain("M2 Meeting Room");
+    expect(html).toContain("M2 Conference Room");
     expect(html).not.toContain("M2 · M2");
     expect(html).toContain("1 pass");
     expect(html).toMatch(/Long booking discount \(\d+%\)/);

@@ -37,7 +37,7 @@ Visual-only restyle — booking logic, Stripe Payment Element, and validation ar
 | Long booking discount | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
 | Overtime | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
 | Parking | $20/person/day reserved parking under the building, 0–20 passes, guest-selected on the room page. Always on — not the legacy addon-catalog mechanism (see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) #3), priced/stored on `bookings.parking_passes`/`parking_cents` (migration `014`), excluded from the 20% long-booking discount |
-| Hours | Mon–Fri 7:00–18:00 |
+| Hours | Mon–Fri 8:00am–6:00pm CT (8:00–18:00) |
 | Flow | Request-to-book + host accept/decline |
 | Cancel | Standard — free up to 48h before start, no refund after; host has 24h to respond or the hold auto-releases (`npm run bookings:expire` / cron) |
 | Stripe | Test mode only — live keys (`sk_live_`/`rk_live_`/`pk_live_`) are refused unless `ALLOW_STRIPE_LIVE=true` |

@@ -72,7 +72,7 @@ const SHARED_AMENITIES = [
 
 const SHARED_HOURS = [1, 2, 3, 4, 5].map((weekday) => ({
   weekday,
-  startMinute: 7 * 60,
+  startMinute: 8 * 60, // Mon–Fri 8:00–18:00 CT (migration 018)
   endMinute: 18 * 60,
 }));
 
@@ -182,11 +182,13 @@ function makeRoom(opts: {
   googleCalendarId: string;
   googleBusyCalendarIds?: string[];
   parkingAddonId: string;
+  /** Defaults to "<shortTitle> Meeting Room". */
+  title?: string;
 }): SpacePublic {
   return {
     id: opts.id,
     slug: opts.slug,
-    title: `${opts.shortTitle} Meeting Room`,
+    title: opts.title ?? `${opts.shortTitle} Meeting Room`,
     shortTitle: opts.shortTitle,
     subtitle: `${capacityLabel(opts)} · ${CUE_LOCATION.name}`,
     description: "Meeting room for presentations, team meetings, and workshops.",
@@ -236,6 +238,7 @@ export const CUE_M2: SpacePublic = makeRoom({
   id: IDS.m2,
   slug: "arts-district-m2",
   shortTitle: "M2",
+  title: "M2 Conference Room", // migration 019
   capacity: 20,
   baseHourlyCents: 12500,
   googleCalendarId:

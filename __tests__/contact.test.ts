@@ -36,7 +36,7 @@ describe("POST /api/contact", () => {
       name: "Ada Lovelace",
       email: "ada@example.com",
       message: "Is M2 available Friday afternoon?",
-      roomName: "M2 Meeting Room",
+      roomName: "M2 Conference Room",
       roomSlug: "arts-district-m2",
     });
     expect(res.status).toBe(200);

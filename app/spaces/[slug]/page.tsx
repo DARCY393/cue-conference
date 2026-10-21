@@ -205,9 +205,9 @@ function normalizeTime(value: string): string {
   return v;
 }
 
-/** Half-hour slots 07:00–18:00 (Cue bookable window). */
-const TIME_OPTIONS: string[] = Array.from({ length: 23 }, (_, i) => {
-  const minutes = 7 * 60 + i * 30;
+/** Half-hour slots 08:00–18:00 (Cue bookable window, Mon–Fri 8am–6pm CT). */
+const TIME_OPTIONS: string[] = Array.from({ length: 21 }, (_, i) => {
+  const minutes = 8 * 60 + i * 30;
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
@@ -350,9 +350,18 @@ export default function SpacePage() {
   const minHours = space?.pricing.minHours ?? 1;
 
   const minEndTime = useMemo(
-    () => addMinutesToTime(normalizeTime(startTime) || "07:00", minHours * 60),
+    () => addMinutesToTime(normalizeTime(startTime) || "08:00", minHours * 60),
     [startTime, minHours]
   );
+
+  /** Latest start that still fits the minimum booking before 18:00. */
+  const startTimeOptions = useMemo(() => {
+    const latest = 18 * 60 - minHours * 60;
+    return TIME_OPTIONS.filter((t) => {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m <= latest;
+    });
+  }, [minHours]);
 
   const endTimeOptions = useMemo(
     () => TIME_OPTIONS.filter((t) => t >= minEndTime),
@@ -557,7 +566,7 @@ export default function SpacePage() {
               </span>
               <span className="cue-chip">
                 <Clock aria-hidden className="mr-1.5 h-3.5 w-3.5" />
-                Mon–Fri 7:00–18:00 ({space.timezone})
+                Mon–Fri 8:00am–6:00pm CT
               </span>
             </div>
             {space.amenities.length > 0 && (
@@ -645,7 +654,7 @@ export default function SpacePage() {
                 className="cue-select"
                 aria-label="Start time"
               >
-                {TIME_OPTIONS.map((t) => (
+                {startTimeOptions.map((t) => (
                   <option key={`s-${t}`} value={t}>
                     {t}
                   </option>

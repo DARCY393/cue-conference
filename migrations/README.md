@@ -123,3 +123,10 @@ reports the card hold as authorized. Idempotent (`IF NOT EXISTS`).
 "Seats 8 (max 10)": `capacity` stays the maximum number of people (10) and
 `seated_capacity` is the seated count (8). M2 (20) and M3 (5) are unchanged.
 Idempotent.
+
+## Applying 018 and 019
+
+`018_bookable_hours_8_to_6.sql` sets M1–M4 bookable hours to Mon–Fri 8:00–18:00
+America/Chicago (was 7:00). Existing bookings are not changed.
+`019_rename_m2_conference_room.sql` renames M2 to "M2 Conference Room" (short title stays "M2").
+Both idempotent.

@@ -512,7 +512,7 @@ manual SQL step, not part of this script.)
 - [ ] `dig +short A book.thecue.work` returns `217.196.48.137`
 - [ ] `/spaces/arts-district-m1` through `-m4` each load, show seats/rate/amenities
 - [ ] `/spaces/cue-dallas` redirects to `/spaces/arts-district-m1`
-- [ ] Request a booking on a weekday 7:00–18:00 America/Chicago slot; quote
+- [ ] Request a booking on a weekday 8:00–18:00 America/Chicago slot; quote
       total matches `rate × hours`
 - [ ] Pay with Stripe test card `4242 4242 4242 4242` — Payment Element
       confirms (or, if no Stripe keys are set yet, the mock-hold alert shows

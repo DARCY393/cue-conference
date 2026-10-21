@@ -105,7 +105,7 @@ paths:
                 outside_hours:
                   value:
                     error: outside_bookable_hours
-                    message: Requested time is outside Mon–Fri 7:00–18:00 local.
+                    message: Requested time is outside Mon–Fri 8:00am–6:00pm CT.
 
   /bookings:
     post:
@@ -795,7 +795,7 @@ components:
           description: 0=Sunday … 6=Saturday
         startMinute:
           type: integer
-          example: 420
+          example: 480
         endMinute:
           type: integer
           example: 1080

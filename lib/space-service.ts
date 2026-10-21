@@ -41,7 +41,7 @@ type SpaceRow = {
   google_busy_calendar_ids: string[] | null;
 };
 
-/** Fallback for rows with no short_title: use the title's first word (e.g. "M2 Meeting Room" -> "M2"). */
+/** Fallback for rows with no short_title: use the title's first word (e.g. "M2 Conference Room" -> "M2"). */
 function deriveShortTitle(title: string): string {
   return title.split(" ")[0] || title;
 }

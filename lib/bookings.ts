@@ -153,7 +153,7 @@ export async function createQuoteForSpace(
     return {
       ok: false,
       error: "outside_bookable_hours",
-      message: "Requested time is outside Mon–Fri 7:00–18:00 local.",
+      message: "Requested time is outside Mon–Fri 8:00am–6:00pm CT.",
       status: 409,
     };
   }
