@@ -69,6 +69,16 @@ describe("stripe webhook with Connect", () => {
     expect(getStore().paymentEvents).toHaveLength(1);
   });
 
+  it("ignores events from the other Stripe mode (live event on a test platform key)", async () => {
+    const { POST } = await import("../app/api/v1/webhooks/stripe/route");
+    const res = await POST(signed({ ...piEvent("acct_TESTSPP123"), livemode: true }, CONNECT_SECRET));
+    expect(JSON.stringify(await res.json())).toContain("other_mode");
+    expect(getStore().paymentEvents).toHaveLength(0);
+    const ok = await POST(signed({ ...piEvent("acct_TESTSPP123"), livemode: false }, CONNECT_SECRET));
+    expect(await ok.json()).toMatchObject({ received: true });
+    expect(getStore().paymentEvents).toHaveLength(1);
+  });
+
   it("rejects a bad signature", async () => {
     const { POST } = await import("../app/api/v1/webhooks/stripe/route");
     const res = await POST(signed(piEvent("acct_TESTSPP123"), "whsec_wrong"));

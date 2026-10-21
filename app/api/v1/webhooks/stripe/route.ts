@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getStripe, hasStripe } from "@/lib/stripe";
-import { getConnectConfig } from "@/lib/stripe-connect";
+import { getConnectConfig, isLiveKey } from "@/lib/stripe-connect";
 import { authorizeBooking } from "@/lib/bookings";
 import { jsonError, jsonOk } from "@/lib/http";
 import { getStore, isDemoMode } from "@/lib/store";
@@ -14,6 +14,7 @@ type LooseEvent = {
   type: string;
   /** Set on Connect events (the connected account the object lives on). */
   account?: string;
+  livemode?: boolean;
   data: { object: Record<string, unknown> };
 };
 
@@ -60,6 +61,7 @@ export async function POST(req: NextRequest) {
       id: constructed.id,
       type: constructed.type,
       account: constructed.account ?? undefined,
+      livemode: constructed.livemode,
       data: {
         object: constructed.data.object as unknown as Record<string, unknown>,
       },
@@ -78,6 +80,11 @@ export async function POST(req: NextRequest) {
   const connect = getConnectConfig();
   if (viaConnectEndpoint && (!connect || event.account !== connect.connectedAccountId)) {
     return jsonOk({ received: true, ignored: "other_account" });
+  }
+  // Never let a test-mode event touch a live deployment (or vice versa): the SPP account's test
+  // endpoint keeps delivering preview events to this URL after live goes live.
+  if (connect && typeof event.livemode === "boolean" && event.livemode !== isLiveKey(connect.platformSecretKey)) {
+    return jsonOk({ received: true, ignored: "other_mode" });
   }
 
   const obj = event.data?.object ?? {};
