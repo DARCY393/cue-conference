@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { getStripe, hasStripe } from "@/lib/stripe";
+import { getConnectConfig } from "@/lib/stripe-connect";
+import { authorizeBooking } from "@/lib/bookings";
 import { jsonError, jsonOk } from "@/lib/http";
 import { getStore, isDemoMode } from "@/lib/store";
 import { query } from "@/lib/db";
@@ -8,40 +10,58 @@ import { randomUUID } from "crypto";
 type LooseEvent = {
   id: string;
   type: string;
+  /** Set on Connect events (the connected account the object lives on). */
+  account?: string;
   data: { object: Record<string, unknown> };
 };
+
+/**
+ * Signing secrets to try: the account endpoint (STRIPE_WEBHOOK_SECRET) and, with Stripe Connect,
+ * the platform's Connect endpoint (STRIPE_CONNECT_WEBHOOK_SECRET), which receives the connected
+ * account's events with an `account` field.
+ */
+function webhookSecrets(): { secret: string; connect: boolean }[] {
+  return [
+    { secret: (process.env.STRIPE_WEBHOOK_SECRET || "").trim(), connect: false },
+    { secret: (process.env.STRIPE_CONNECT_WEBHOOK_SECRET || "").trim(), connect: true },
+  ].filter((s) => s.secret);
+}
 
 export async function POST(req: NextRequest) {
   const signature = req.headers.get("stripe-signature");
   const raw = await req.text();
 
   let event: LooseEvent;
+  let viaConnectEndpoint = false;
 
-  if (hasStripe() && process.env.STRIPE_WEBHOOK_SECRET) {
+  const secrets = webhookSecrets();
+  if (hasStripe() && secrets.length > 0) {
     if (!signature) {
       return jsonError(400, "bad_request", "Missing Stripe-Signature");
     }
-    try {
-      const stripe = getStripe()!;
-      const constructed = stripe.webhooks.constructEvent(
-        raw,
-        signature,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
-      event = {
-        id: constructed.id,
-        type: constructed.type,
-        data: {
-          object: constructed.data.object as unknown as Record<string, unknown>,
-        },
-      };
-    } catch (e) {
-      return jsonError(
-        400,
-        "bad_request",
-        e instanceof Error ? e.message : "Invalid signature"
-      );
+    const stripe = getStripe()!;
+    let constructed: ReturnType<typeof stripe.webhooks.constructEvent> | null = null;
+    let lastError = "Invalid signature";
+    for (const { secret, connect } of secrets) {
+      try {
+        constructed = stripe.webhooks.constructEvent(raw, signature, secret);
+        viaConnectEndpoint = connect;
+        break;
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : "Invalid signature";
+      }
     }
+    if (!constructed) {
+      return jsonError(400, "bad_request", lastError);
+    }
+    event = {
+      id: constructed.id,
+      type: constructed.type,
+      account: constructed.account ?? undefined,
+      data: {
+        object: constructed.data.object as unknown as Record<string, unknown>,
+      },
+    };
   } else {
     try {
       event = JSON.parse(raw) as LooseEvent;
@@ -50,11 +70,20 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Connect endpoint: only the SPP/Cue connected account's events count; other accounts on the
+  // platform and platform-level events (no account) are acknowledged and ignored. Events on the
+  // SPP account's own endpoint (STRIPE_WEBHOOK_SECRET) carry no account field and are accepted.
+  const connect = getConnectConfig();
+  if (viaConnectEndpoint && (!connect || event.account !== connect.connectedAccountId)) {
+    return jsonOk({ received: true, ignored: "other_account" });
+  }
+
   const obj = event.data?.object ?? {};
   const piId = String(obj.id ?? "");
   const amount = Number(obj.amount ?? obj.amount_received ?? 0);
   const bookingId =
     (obj.metadata as Record<string, string> | undefined)?.bookingId ||
+    (obj.metadata as Record<string, string> | undefined)?.booking_id ||
     undefined;
 
   const typeMap: Record<string, string> = {
@@ -64,6 +93,16 @@ export async function POST(req: NextRequest) {
     "charge.refunded": "refund",
   };
   const paymentType = typeMap[event.type];
+
+  // Card hold authorized: promote the draft to a request (idempotent; also triggered by the
+  // guest's browser). This covers a guest who closes the tab right after confirming.
+  if (event.type === "payment_intent.amount_capturable_updated" && bookingId) {
+    try {
+      await authorizeBooking(bookingId);
+    } catch (e) {
+      console.error("[webhook] authorizeBooking failed", bookingId, e instanceof Error ? e.message : e);
+    }
+  }
 
   if (paymentType) {
     const idempotencyKey = event.id;

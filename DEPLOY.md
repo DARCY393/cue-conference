@@ -151,6 +151,17 @@ STRIPE_WEBHOOK_SECRET=whsec_REPLACE_ME
 # Notification "to" address for new-booking host emails — not an auth gate.
 HOST_EMAIL=REPLACE_WITH_STAFF_EMAIL
 
+# SMTP — real email send (lib/email.ts via nodemailer). All five required or
+# it falls back to logging emails to the console instead of sending them.
+SMTP_HOST=REPLACE_ME
+SMTP_PORT=587
+SMTP_USER=REPLACE_ME
+SMTP_PASS=REPLACE_ME
+EMAIL_FROM="Cue <noreply@thecue.work>"
+
+# "To" address for the room-page contact form. Defaults to darcy@thecue.work.
+# CONTACT_EMAIL=darcy@thecue.work
+
 # Signs the staff session cookie for /host and /api/v1/host/* (see §13).
 # Required — the app refuses to start the staff session system without it
 # once NODE_ENV=production. Generate with:
@@ -303,6 +314,48 @@ systemctl list-timers | grep certbot
   live: swap in live keys, create a **new** live-mode webhook endpoint (same
   path, new `whsec_…`), set `ALLOW_STRIPE_LIVE=true`, then rebuild (§7/§15) —
   changing env vars alone does not take effect without a rebuild+restart.
+
+### Stripe Connect (Honeycomb platform fee) — optional, OFF by default
+
+Honeycomb's Stripe account is the **platform**; the SPP/Cue Stripe account is the
+**connected account**. With Connect on, the app uses the platform secret key and
+sends every call with `Stripe-Account: <connected acct>` (direct charges):
+
+- Booking hold: manual-capture PaymentIntent with
+  `application_fee_amount = round(APPLICATION_FEE_BPS × charged amount / 10000)`
+  (default 1000 bps = 10%, parking and add-ons included). The fee is collected on
+  capture; a decline, cancel or 24h auto-decline cancels the PI and releases it.
+- Overtime/damage off-session PaymentIntents get the same fee on the full amount.
+- Refunds pass `refund_application_fee: true`, so Honeycomb's fee is returned pro rata.
+- `APPLICATION_FEE_ROOM_ONLY=true` bases the booking fee on room time only
+  (room subtotal after the long-booking discount, no parking/add-ons).
+- Every PI keeps the Cue Arts District Conference Room tags (metadata
+  `business=cue_arts_district_conference_room`, description, and
+  `statement_descriptor_suffix` `CUE ARTS DIST`).
+
+Setup (test mode first):
+
+1. In Honeycomb's Stripe dashboard (test mode) enable Connect and finish the platform profile.
+2. Connect the SPP/Cue account. Either:
+   - **Existing SPP account (Standard):** create an OAuth link from Settings → Connect →
+     Onboarding options (OAuth) and have D'Arcy approve it while signed in to the SPP
+     account, or create an account link for it; or
+   - **Test only:** create a test connected account
+     (`POST /v1/accounts` with `type=standard` or `type=express`) and complete its
+     onboarding link with Stripe's test data.
+3. Set in the env file: `STRIPE_PLATFORM_SECRET_KEY` (Honeycomb sk_test_),
+   `STRIPE_CONNECTED_ACCOUNT_ID` and `NEXT_PUBLIC_STRIPE_CONNECTED_ACCOUNT_ID` (acct_…),
+   `APPLICATION_FEE_BPS=1000`, and switch `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` to
+   **Honeycomb's** pk_test_. NEXT_PUBLIC_* values are baked in at build time, so rebuild.
+4. Webhooks: add a **Connect** endpoint on the platform ("Listen to events on Connected
+   accounts") pointing at `/api/v1/webhooks/stripe` and put its signing secret in
+   `STRIPE_CONNECT_WEBHOOK_SECRET`. The route verifies with either secret; Connect events
+   for any account other than `STRIPE_CONNECTED_ACCOUNT_ID` are acknowledged and ignored.
+5. Going live needs D'Arcy's explicit approval (`ALLOW_STRIPE_LIVE=true` plus live keys).
+
+To turn Connect off, remove `STRIPE_PLATFORM_SECRET_KEY` / `STRIPE_CONNECTED_ACCOUNT_ID`,
+restore the SPP pk_test_ and rebuild. Note: PaymentIntents created under Connect live on the
+connected account, so capture/refund of those needs Connect to stay on until they settle.
 
 ## 12. Google Calendar sync
 
@@ -474,14 +527,23 @@ manual SQL step, not part of this script.)
 - [ ] Stripe webhook endpoint shows successful deliveries (test mode dashboard)
 - [ ] `?embed=1` on a room page hides header/footer and renders compactly
 - [ ] iframe test page on a `thecue.work`-origin host actually loads the embed (not blocked by CSP)
+- [ ] Add 1+ parking passes on a booking — quote shows a separate Parking line, total includes it, and it's not reduced by the 8h+ discount
+- [ ] Submit the room page's "Questions?" form — `CONTACT_EMAIL` (or `darcy@thecue.work`) receives it with `replyTo` set to the guest's address
+- [ ] With SMTP env vars set, confirm the booking-request/accept emails actually arrive (not just console logs)
 
-## 17. Booking-expiry cron
+## 17. Booking-expiry cron (also sends reminder emails)
 
 Requests the host doesn't accept/decline within 24h must auto-decline and
 release their payment hold (`expireOverdueRequests()` in `lib/bookings.ts`).
 This also happens lazily whenever the host queue is read, so the cron is a
 backstop for requests no one ever looks at — not the only thing keeping
 expiry timely.
+
+The same run also sends 24h-before-start reminder emails for accepted
+bookings (`sendDueReminders()` in `lib/reminders.ts`, idempotent via
+`bookings.reminder_sent_at`) — both `npm run bookings:expire` and
+`POST /api/v1/internal/expire-requests` do the expiry scan and the reminder
+scan back to back, so you don't need a second cron entry for reminders.
 
 Run it directly on the box (simplest — no `CRON_SECRET` needed since it
 doesn't go over HTTP):
