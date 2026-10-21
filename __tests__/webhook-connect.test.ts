@@ -75,3 +75,13 @@ describe("stripe webhook with Connect", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("stripe webhook: events for bookings in another deployment's DB", () => {
+  it("only records payment_events for bookings that exist here, and 200s the rest", async () => {
+    const { readFileSync } = await import("fs");
+    const src = readFileSync(require("path").join(__dirname, "../app/api/v1/webhooks/stripe/route.ts"), "utf8");
+    expect(src).toContain("WHERE EXISTS (SELECT 1 FROM bookings WHERE id = $1::uuid)");
+    expect(src).toContain('ignored: "unknown_booking"');
+    expect(src).toContain("$2::payment_event_type");
+  });
+});

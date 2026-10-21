@@ -7,6 +7,8 @@ import { getStore, isDemoMode } from "@/lib/store";
 import { query } from "@/lib/db";
 import { randomUUID } from "crypto";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 type LooseEvent = {
   id: string;
   type: string;
@@ -121,12 +123,21 @@ export async function POST(req: NextRequest) {
         });
       }
     } else if (bookingId) {
-      await query(
+      // The SPP account's endpoint also receives events for PIs made by other deployments on the
+      // same Stripe account (e.g. the preview). Record only bookings that exist in THIS database and
+      // acknowledge the rest with 200, so Stripe doesn't retry them (and eventually disable us).
+      if (!UUID_RE.test(bookingId)) return jsonOk({ received: true, ignored: "unknown_booking" });
+      const { rowCount } = await query(
         `INSERT INTO payment_events (booking_id, type, amount_cents, stripe_object_id, idempotency_key, raw_json)
-         VALUES ($1,$2,$3,$4,$5,$6)
+         SELECT $1::uuid, $2::payment_event_type, $3::integer, $4::text, $5::text, $6::jsonb
+         WHERE EXISTS (SELECT 1 FROM bookings WHERE id = $1::uuid)
          ON CONFLICT (idempotency_key) DO NOTHING`,
         [bookingId, paymentType, amount, piId, idempotencyKey, raw]
       );
+      if (!rowCount) {
+        const known = await query(`SELECT 1 FROM bookings WHERE id = $1::uuid`, [bookingId]);
+        if (!known.rows.length) return jsonOk({ received: true, ignored: "unknown_booking" });
+      }
     }
   }
 
