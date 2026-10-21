@@ -24,6 +24,21 @@ export interface QuoteInput {
    * difference — see `expandDayWindows()` in `lib/availability.ts`.
    */
   totalHours?: number;
+  /** Reserved parking passes under the building (0-20, integer). See PARKING_RATE_CENTS. */
+  parkingPasses?: number;
+}
+
+/** $20/person/day reserved parking under the building. */
+export const PARKING_RATE_CENTS = 2000;
+export const PARKING_MAX_PASSES = 20;
+
+/** Throws if not an integer in [0, PARKING_MAX_PASSES]. Treats undefined/null as 0. */
+export function validateParkingPasses(value: number | null | undefined): number {
+  if (value === undefined || value === null) return 0;
+  if (!Number.isInteger(value) || value < 0 || value > PARKING_MAX_PASSES) {
+    throw new Error(`parkingPasses must be an integer between 0 and ${PARKING_MAX_PASSES}`);
+  }
+  return value;
 }
 
 function hoursBetween(startsAt: Date, endsAt: Date): number {
@@ -33,16 +48,28 @@ function hoursBetween(startsAt: Date, endsAt: Date): number {
 }
 
 /** Calendar days spanned for per_day addons (min 1). */
-export function calendarDaysSpanned(startsAt: Date, endsAt: Date): number {
-  const start = Date.UTC(
-    startsAt.getUTCFullYear(),
-    startsAt.getUTCMonth(),
-    startsAt.getUTCDate()
-  );
+/** Local calendar date (YYYY-MM-DD) of an instant in the given IANA zone. */
+function localDateKey(d: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  return Date.UTC(get("year"), get("month") - 1, get("day"));
+}
+
+/** Distinct local calendar days touched by [startsAt, endsAt) (default zone America/Chicago). */
+export function calendarDaysSpanned(
+  startsAt: Date,
+  endsAt: Date,
+  timeZone = "America/Chicago"
+): number {
+  const start = localDateKey(startsAt, timeZone);
   // endsAt is exclusive half-open; last occupied instant is endsAt - 1ms
-  const last = new Date(endsAt.getTime() - 1);
-  const end = Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate());
-  return Math.max(1, Math.floor((end - start) / (24 * 60 * 60 * 1000)) + 1);
+  const end = localDateKey(new Date(endsAt.getTime() - 1), timeZone);
+  return Math.max(1, Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1);
 }
 
 export function computeAddonCents(
@@ -123,9 +150,16 @@ export function calculateQuote(input: QuoteInput): Quote {
     endsAt
   );
 
+  // Parking is priced separately from the addon catalog and never discounted —
+  // the long-booking discount applies to the room charge only.
+  const parkingPasses = validateParkingPasses(input.parkingPasses);
+  const parkingDays = calendarDaysSpanned(startsAt, endsAt);
+  const parkingCents = parkingPasses * parkingDays * PARKING_RATE_CENTS;
+
   const feesCents = input.feesCents ?? 0;
   const taxCents = input.taxCents ?? 0;
-  const totalCents = baseCents - discountCents + addonsCents + feesCents + taxCents;
+  const totalCents =
+    baseCents - discountCents + addonsCents + parkingCents + feesCents + taxCents;
 
   const roomLabel = input.roomLabel ?? "Meeting room";
   const lineItems: QuoteLineItem[] = [
@@ -143,6 +177,13 @@ export function calculateQuote(input: QuoteInput): Quote {
     });
   }
   lineItems.push(...addonLines);
+  if (parkingCents > 0) {
+    lineItems.push({
+      code: "parking",
+      label: `Parking (${parkingPasses} pass${parkingPasses === 1 ? "" : "es"} × ${parkingDays} day${parkingDays === 1 ? "" : "s"} × $20)`,
+      amountCents: parkingCents,
+    });
+  }
   if (feesCents > 0) {
     lineItems.push({ code: "fee", label: "Fees", amountCents: feesCents });
   }
@@ -156,6 +197,8 @@ export function calculateQuote(input: QuoteInput): Quote {
     baseCents,
     discountCents,
     addonsCents,
+    parkingPasses,
+    parkingCents,
     feesCents,
     taxCents,
     totalCents,

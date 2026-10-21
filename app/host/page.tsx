@@ -247,6 +247,9 @@ export default function HostPage() {
                   <div className="text-sm text-cue-stone-500">
                     {b.guestName || "Guest"}
                     {b.guestEmail ? ` · ${b.guestEmail}` : ""} · {formatMoney(b.totalCents)}
+                    {b.parkingPasses
+                      ? ` · parking: ${b.parkingPasses} pass${b.parkingPasses === 1 ? "" : "es"}/day (${formatMoney(b.parkingCents ?? 0)})`
+                      : ""}
                   </div>
                   <div className="flex items-center gap-2 pt-1">
                     <Badge tone="neutral">{b.status}</Badge>

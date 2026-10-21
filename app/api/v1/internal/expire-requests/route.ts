@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "crypto";
 import { NextRequest } from "next/server";
 import { expireOverdueRequests } from "@/lib/bookings";
+import { sendDueReminders } from "@/lib/reminders";
 import { jsonError, jsonOk } from "@/lib/http";
 
 function timingSafeStringsEqual(a: string, b: string): boolean {
@@ -22,5 +23,11 @@ export async function POST(req: NextRequest) {
   }
 
   const result = await expireOverdueRequests();
-  return jsonOk({ expiredCount: result.expiredIds.length, expiredIds: result.expiredIds });
+  const reminders = await sendDueReminders();
+  return jsonOk({
+    expiredCount: result.expiredIds.length,
+    expiredIds: result.expiredIds,
+    expiredDraftIds: result.expiredDraftIds,
+    remindersSent: reminders.remindedIds.length,
+  });
 }

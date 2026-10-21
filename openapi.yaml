@@ -18,6 +18,7 @@ tags:
   - name: Bookings
   - name: Host
   - name: Webhooks
+  - name: Contact
 
 paths:
   /spaces/{slug}:
@@ -465,18 +466,60 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /contact:
+    post:
+      tags: [Contact]
+      operationId: submitContactForm
+      summary: Room page "Questions?" form
+      description: |
+        NOTE: unlike every other path in this document, this route is NOT
+        mounted under `/v1` — it lives at `/api/contact` at the app root
+        (`app/api/contact/route.ts`), so the effective URL is this server's
+        origin + `/api/contact`, not `{server}/contact`.
+        Validates name/email/message, silently no-ops on a filled honeypot
+        (`website`) field, and rate-limits to 5 requests per 10 minutes per
+        IP. Emails `CONTACT_EMAIL` (default darcy@thecue.work) with `replyTo`
+        set to the guest's address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactRequest'
+      responses:
+        '200':
+          description: Sent (or silently dropped if the honeypot was filled)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    const: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          description: Too many requests from this IP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /internal/expire-requests:
     post:
       tags: [Internal]
       operationId: expireOverdueRequests
       summary: >-
         Cron target: auto-decline "requested" bookings whose 24h host
-        response window has passed, releasing each payment hold
+        response window has passed (releasing each payment hold), then send
+        any due 24h-before-start reminder emails
       security:
         - cronSecret: []
       responses:
         '200':
-          description: Scan complete (0 or more expired)
+          description: Scan complete (0 or more expired/reminded)
           content:
             application/json:
               schema:
@@ -490,6 +533,9 @@ paths:
                     items:
                       type: string
                       format: uuid
+                  remindersSent:
+                    type: integer
+                    description: Reminder emails sent this run (see lib/reminders.ts)
         '401':
           $ref: '#/components/responses/Unauthorized'
         '503':
@@ -821,6 +867,27 @@ components:
           items:
             $ref: '#/components/schemas/AvailabilityBusy'
 
+    ContactRequest:
+      type: object
+      required: [name, email, message]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        email:
+          type: string
+          format: email
+        message:
+          type: string
+          maxLength: 5000
+        roomName:
+          type: string
+        roomSlug:
+          type: string
+        website:
+          type: string
+          description: Honeypot — must stay empty. Real guests never see this field.
+
     QuoteAddonInput:
       type: object
       required: [addonId]
@@ -848,6 +915,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/QuoteAddonInput'
+        parkingPasses:
+          type: integer
+          minimum: 0
+          maximum: 20
+          default: 0
+          description: Reserved parking under the building, $20/person/day (lib/quote.ts PARKING_RATE_CENTS)
 
     Quote:
       type: object
@@ -857,6 +930,8 @@ components:
         - baseCents
         - discountCents
         - addonsCents
+        - parkingPasses
+        - parkingCents
         - feesCents
         - taxCents
         - totalCents
@@ -872,8 +947,16 @@ components:
           $ref: '#/components/schemas/MoneyCents'
         discountCents:
           $ref: '#/components/schemas/MoneyCents'
+          description: Applies to the room charge only — never to parkingCents
         addonsCents:
           $ref: '#/components/schemas/MoneyCents'
+        parkingPasses:
+          type: integer
+          minimum: 0
+          maximum: 20
+        parkingCents:
+          $ref: '#/components/schemas/MoneyCents'
+          description: parkingPasses × distinct calendar days in the reservation × $20
         feesCents:
           $ref: '#/components/schemas/MoneyCents'
           description: Optional platform/processing fee you choose to charge
@@ -891,7 +974,7 @@ components:
             properties:
               code:
                 type: string
-                examples: [space, discount_long_booking, addon_parking, fee, tax]
+                examples: [space, discount_long_booking, addon_parking, parking, fee, tax]
               label:
                 type: string
               amountCents:
@@ -932,6 +1015,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CreateBookingAddonInput'
+        parkingPasses:
+          type: integer
+          minimum: 0
+          maximum: 20
+          default: 0
+          description: Re-validated server-side; the quote is always recomputed, never trusted from the client
         guestNotes:
           type: string
         activityDescription:
@@ -1029,6 +1118,12 @@ components:
         discountCents:
           $ref: '#/components/schemas/MoneyCents'
         addonsCents:
+          $ref: '#/components/schemas/MoneyCents'
+        parkingPasses:
+          type: integer
+          minimum: 0
+          maximum: 20
+        parkingCents:
           $ref: '#/components/schemas/MoneyCents'
         feesCents:
           $ref: '#/components/schemas/MoneyCents'

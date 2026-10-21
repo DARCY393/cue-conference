@@ -14,14 +14,17 @@
     "db:migrate:009": "node scripts/migrate-009.mjs",
     "db:migrate:010": "node scripts/migrate-010.mjs",
     "staff:create": "tsx scripts/create-staff-user.ts",
-    "bookings:expire": "tsx scripts/expire-bookings.ts"
+    "bookings:expire": "tsx scripts/expire-bookings.ts",
+    "email:preview": "tsx scripts/render-email-preview.ts"
   },
   "dependencies": {
     "@stripe/react-stripe-js": "^6.9.0",
     "@stripe/stripe-js": "^9.16.0",
+    "@types/nodemailer": "^8.0.2",
     "google-auth-library": "^10.9.1",
     "lucide-react": "^1.59.0",
     "next": "15.5.25",
+    "nodemailer": "^10.1.7",
     "pg": "^8.23.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",

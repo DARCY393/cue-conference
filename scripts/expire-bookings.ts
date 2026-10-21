@@ -1,15 +1,31 @@
 import "dotenv/config";
 import { expireOverdueRequests } from "../lib/bookings";
+import { sendDueReminders } from "../lib/reminders";
 
 async function main() {
   const result = await expireOverdueRequests();
   if (result.expiredIds.length === 0) {
     console.log("No overdue booking requests to expire.");
-    return;
+  } else {
+    console.log(
+      `Expired ${result.expiredIds.length} overdue booking request(s): ${result.expiredIds.join(", ")}`
+    );
   }
-  console.log(
-    `Expired ${result.expiredIds.length} overdue booking request(s): ${result.expiredIds.join(", ")}`
-  );
+
+  if (result.expiredDraftIds.length > 0) {
+    console.log(
+      `Discarded ${result.expiredDraftIds.length} abandoned checkout draft(s): ${result.expiredDraftIds.join(", ")}`
+    );
+  }
+
+  const reminders = await sendDueReminders();
+  if (reminders.remindedIds.length === 0) {
+    console.log("No reminder emails due.");
+  } else {
+    console.log(
+      `Sent ${reminders.remindedIds.length} reminder email(s): ${reminders.remindedIds.join(", ")}`
+    );
+  }
 }
 
 main()

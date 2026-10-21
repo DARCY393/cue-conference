@@ -41,7 +41,16 @@ restored to the default product.
      history for `app/host/page.tsx` before this change for a starting point).
   3. Optionally restore the house-rules copy line.
 
-## 3. Parking add-on ($25/day)
+## 3. Legacy generic "Parking" add-on ($25/day) — superseded
+
+> **Note:** this generic addon-catalog mechanism remains off by default and is
+> unrelated to the dedicated parking-passes feature shipped in migration
+> `014_parking_and_reminders.sql` (`bookings.parking_passes`/`parking_cents`,
+> `lib/quote.ts`'s `PARKING_RATE_CENTS`, surfaced on every room page). The new
+> feature is a separate, always-on mechanism — not gated by
+> `FEATURES.parkingAddon` — and is the one guests actually see today.
+
+
 
 - **Flag:** `FEATURES.parkingAddon` — env `PRICING_ENABLE_PARKING_ADDON=true`
 - **What changed:** the `Parking` addon rows (`d0000000-...-0001` /

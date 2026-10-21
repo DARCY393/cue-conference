@@ -26,6 +26,8 @@ export async function POST(
     /** Calendar date (any ISO instant on that local day) of a multi-day reservation's last day. */
     endDate?: string;
     addons?: { addonId: string; quantity?: number }[];
+    /** Reserved parking passes under the building (0-20, integer). */
+    parkingPasses?: number;
   };
   try {
     body = await req.json();
@@ -49,7 +51,14 @@ export async function POST(
   }
   const spaceId = await resolveSpaceId(key);
   if (!spaceId) return jsonError(404, "not_found", "Space not found");
-  const result = await createQuoteForSpace(spaceId, startsAt, endsAt, body.addons, endDate);
+  const result = await createQuoteForSpace(
+    spaceId,
+    startsAt,
+    endsAt,
+    body.addons,
+    endDate,
+    body.parkingPasses
+  );
   if (!result.ok) {
     return jsonError(result.status, result.error, result.message);
   }
