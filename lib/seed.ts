@@ -1,3 +1,4 @@
+import { capacityLabel } from "./format";
 import type { AddonPublic, CancellationRules, LocationPublic, SpacePricing, SpacePublic } from "./types";
 import { CANCELLATION_DEFAULT } from "./refund";
 import { FEATURES } from "./features";
@@ -116,30 +117,66 @@ export function legacyParkingAddon(id: string): AddonPublic {
 
 export const LEGACY_PARKING_ADDON: AddonPublic = legacyParkingAddon(IDS.parkingM1);
 
-/** Up to 3 gallery photos per room (sortOrder 0-2); see docs on the 3-photo cap. */
-const ROOM_PHOTOS = [
+type RoomPhoto = SpacePublic["photos"][number];
+
+/** Shared Cue Arts District shots shown after each room's own photo(s). */
+const GENERAL_PHOTOS: Omit<RoomPhoto, "sortOrder">[] = [
   {
-    url: "https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200",
-    alt: "Meeting room",
-    sortOrder: 0,
+    url: "/images/rooms/cue-kitchenette.jpg",
+    alt: "Cue kitchenette with coffee machine, counter seating and a high-top table",
   },
   {
-    url: "https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=1200",
-    alt: "Meeting room seating",
-    sortOrder: 1,
+    url: "/images/rooms/cue-lounge.jpg",
+    alt: "Cue lounge sitting area with a sofa, armchairs and coffee tables",
   },
   {
-    url: "https://images.unsplash.com/photo-1431540015161-0bf868a2d407?w=1200",
-    alt: "Meeting room table",
-    sortOrder: 2,
+    url: "/images/rooms/cue-common-area.jpg",
+    alt: "Open common area at Cue Arts District with lounge seating and the Cue moss wall sign",
   },
 ];
+
+/** Room photo(s) first, then the shared general shots (see MAX_GALLERY_PHOTOS). */
+function roomPhotos(own: Omit<RoomPhoto, "sortOrder">[]): RoomPhoto[] {
+  return [...own, ...GENERAL_PHOTOS].map((p, i) => ({ ...p, sortOrder: i }));
+}
+
+const ROOM_OWN_PHOTOS: Record<string, Omit<RoomPhoto, "sortOrder">[]> = {
+  M1: [
+    {
+      url: "/images/rooms/m1-meeting-room.jpg",
+      alt: "M1 Meeting Room seen through its glass door, with a conference table and chairs",
+    },
+  ],
+  M2: [
+    {
+      url: "/images/rooms/m2-conference-room.jpg",
+      alt: "M2 Conference Room behind a glass wall, with a long conference table seating 20",
+    },
+  ],
+  M3: [
+    {
+      url: "/images/rooms/m3-meeting-room.jpg",
+      alt: "M3 Meeting Room with a table for five and a wall-mounted screen on a navy accent wall",
+    },
+    {
+      url: "/images/rooms/m3-meeting-room-screen.jpg",
+      alt: "M3 Meeting Room through the glass door, with the TV on the navy wall",
+    },
+  ],
+  M4: [
+    {
+      url: "/images/rooms/m4-meeting-room.jpg",
+      alt: "M4 Meeting Room seen through its glass wall, with a conference table and chairs",
+    },
+  ],
+};
 
 function makeRoom(opts: {
   id: string;
   slug: string;
   shortTitle: string;
   capacity: number;
+  seatedCapacity?: number;
   baseHourlyCents: number;
   minHours?: number;
   googleCalendarId: string;
@@ -151,12 +188,13 @@ function makeRoom(opts: {
     slug: opts.slug,
     title: `${opts.shortTitle} Meeting Room`,
     shortTitle: opts.shortTitle,
-    subtitle: `${opts.capacity} seats · ${CUE_LOCATION.name}`,
+    subtitle: `${capacityLabel(opts)} · ${CUE_LOCATION.name}`,
     description: "Meeting room for presentations, team meetings, and workshops.",
     city: CUE_LOCATION.city,
     neighborhood: CUE_LOCATION.neighborhood,
     timezone: "America/Chicago",
     capacity: opts.capacity,
+    seatedCapacity: opts.seatedCapacity,
     status: "live",
     pricing: {
       ...ROOM_PRICING,
@@ -164,7 +202,7 @@ function makeRoom(opts: {
       minHours: opts.minHours ?? DEFAULT_MIN_HOURS,
     },
     bookableHours: SHARED_HOURS,
-    photos: ROOM_PHOTOS.map((p) => ({ ...p })),
+    photos: roomPhotos(ROOM_OWN_PHOTOS[opts.shortTitle] ?? []),
     amenities: SHARED_AMENITIES,
     // Parking addon removed from the default catalog; see docs/REMOVED_FEATURES.md.
     addons: FEATURES.parkingAddon ? [legacyParkingAddon(opts.parkingAddonId)] : [],
@@ -185,7 +223,9 @@ export const CUE_M1: SpacePublic = makeRoom({
   id: IDS.m1,
   slug: "arts-district-m1",
   shortTitle: "M1",
+  // "Seats 8 (max 10)" — see migrations/017_seated_capacity.sql.
   capacity: 10,
+  seatedCapacity: 8,
   baseHourlyCents: 7000,
   googleCalendarId:
     "c_e88039667398de2f9dd4f5b5c52147b034323e48620c7cb4c278eefcdc0601a6@group.calendar.google.com",
@@ -220,6 +260,7 @@ export const CUE_M4: SpacePublic = makeRoom({
   slug: "arts-district-m4",
   shortTitle: "M4",
   capacity: 10,
+  seatedCapacity: 8,
   baseHourlyCents: 7000,
   googleCalendarId:
     "c_44bb9580defceabfbb00be84aee1b13223c607efffc9051673f813a5e03a6152@group.calendar.google.com",

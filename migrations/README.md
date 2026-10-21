@@ -16,6 +16,9 @@ psql "$DATABASE_URL" -f migrations/010_arts_district_rooms.sql  # Arts District 
 psql "$DATABASE_URL" -f migrations/011_restore_discount_and_room_photos.sql  # 20% long-booking discount + room photos
 psql "$DATABASE_URL" -f migrations/012_staff_auth.sql  # staff_users + staff_sessions (real staff sign-in)
 psql "$DATABASE_URL" -f migrations/013_standard_cancellation_policy.sql  # 48h free-cancellation policy
+psql "$DATABASE_URL" -f migrations/014_parking_and_reminders.sql  # parking passes + reminder_sent_at
+psql "$DATABASE_URL" -f migrations/015_real_room_photos.sql  # real Cue room + general photos
+psql "$DATABASE_URL" -f migrations/016_draft_until_authorized.sql  # draft until card authorized + request idempotency key
 ```
 
 Or:
@@ -85,3 +88,38 @@ npm run db:migrate          # skips already-applied files; applies 013
 # or
 psql "$DATABASE_URL" -f migrations/013_standard_cancellation_policy.sql
 ```
+
+## Applying 014 on an existing DB
+
+`014_parking_and_reminders.sql` is idempotent (`ADD COLUMN IF NOT EXISTS` /
+`DROP CONSTRAINT IF EXISTS` / `CREATE INDEX IF NOT EXISTS`) — it adds
+`bookings.parking_passes`, `bookings.parking_cents`, and
+`bookings.reminder_sent_at`, and widens the `bookings_totals` CHECK
+constraint to include `parking_cents`.
+
+```bash
+npm run db:migrate          # skips already-applied files; applies 014
+# or
+psql "$DATABASE_URL" -f migrations/014_parking_and_reminders.sql
+```
+
+## Applying 015
+
+`015_real_room_photos.sql` swaps the Unsplash placeholders for the real Cue
+photos in `public/images/rooms/` (room shot(s) first, then kitchenette, lounge
+and common area). It deletes only placeholder URLs and its own
+`/images/rooms/` rows before inserting, so it is safe to re-run.
+
+## Applying 016
+
+`016_draft_until_authorized.sql` adds `bookings.client_request_key` (unique when set) and an
+index for the abandoned-draft sweep. Bookings are created as `draft` when the guest clicks
+"Continue to payment" and only become `requested` (host alert + guest email) after Stripe
+reports the card hold as authorized. Idempotent (`IF NOT EXISTS`).
+
+## Applying 017
+
+`017_seated_capacity.sql` adds `spaces.seated_capacity` and sets M1 and M4 to
+"Seats 8 (max 10)": `capacity` stays the maximum number of people (10) and
+`seated_capacity` is the seated count (8). M2 (20) and M3 (5) are unchanged.
+Idempotent.

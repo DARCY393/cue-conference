@@ -69,7 +69,10 @@ export interface SpacePublic {
   city: string;
   neighborhood?: string;
   timezone: string;
+  /** Maximum people allowed in the room (guest-count limit). */
   capacity: number;
+  /** Comfortable seated count when lower than the max, e.g. 8 for "Seats 8 (max 10)". */
+  seatedCapacity?: number;
   status: "draft" | "live" | "paused";
   pricing: SpacePricing;
   bookableHours: BookableHours[];
@@ -110,6 +113,8 @@ export interface Quote {
   baseCents: number;
   discountCents: number;
   addonsCents: number;
+  parkingPasses: number;
+  parkingCents: number;
   feesCents: number;
   taxCents: number;
   totalCents: number;
@@ -131,6 +136,8 @@ export interface Booking {
   subtotalCents: number;
   discountCents: number;
   addonsCents: number;
+  parkingPasses?: number;
+  parkingCents?: number;
   feesCents: number;
   taxCents: number;
   totalCents: number;
@@ -148,6 +155,9 @@ export interface Booking {
   completedAt?: string;
   stripePaymentIntentId?: string;
   googleEventId?: string;
+  reminderSentAt?: string;
+  /** Per-form idempotency key from the guest's browser (internal; stripped from API responses). */
+  clientRequestKey?: string;
   accessDetails?: string;
   createdAt: string;
   guestEmail?: string;

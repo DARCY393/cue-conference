@@ -140,6 +140,7 @@ class MemoryStore {
     const ids = this.hostSpaceIds();
     return this.bookings.filter((b) => {
       if (!ids.has(b.spaceId)) return false;
+      if (b.status === "draft") return false;
       if (opts.status && b.status !== opts.status) return false;
       if (opts.from && b.endsAt <= opts.from) return false;
       if (opts.to && b.startsAt >= opts.to) return false;

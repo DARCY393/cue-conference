@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, MouseEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, MouseEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   Elements,
@@ -8,15 +8,28 @@ import {
   useElements,
   useStripe,
 } from "@stripe/react-stripe-js";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { Clock, CreditCard, MapPin, Users } from "lucide-react";
 import type { Quote, SpacePublic } from "@/lib/types";
 import HouseRules from "@/components/HouseRules";
+import { ContactForm } from "@/components/ContactForm";
+import { HoldNotice } from "@/components/HoldNotice";
+import {
+  RESERVE_ANCHOR,
+  RequestToBookButton,
+  scrollToReserve,
+} from "@/components/RequestToBookButton";
+import { holdButtonLabel } from "@/lib/hold-copy";
 import { AmenityTile } from "@/components/ui/AmenityTile";
 import { Badge } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
-import { Button, buttonClasses } from "@/components/ui/Button";
-import { formatMoney, formatRate, roomCode } from "@/lib/format";
+import { Button } from "@/components/ui/Button";
+import { capacityLabel, formatMoney, formatRate, roomCode } from "@/lib/format";
+import { isValidEmail } from "@/lib/validate";
+import { MAX_GALLERY_PHOTOS } from "@/lib/space-public";
+
+const PARKING_MAPS_URL =
+  "https://www.google.com/maps/search/?api=1&query=720+N+Ervay+St+Dallas+TX+75201";
 
 const money = formatMoney;
 
@@ -47,20 +60,32 @@ function nextWeekdayChicago(): string {
   return `${y}-${m}-${d}`;
 }
 
-function RoomPlaceholder({ code, capacity }: { code: string; capacity: number }) {
+/** One idempotency key per checkout attempt, so a double click or retry can't create two bookings. */
+function newRequestKey(): string {
+  const c = typeof globalThis !== "undefined" ? globalThis.crypto : undefined;
+  if (c && "randomUUID" in c) return c.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function RoomPlaceholder({ code, capacity }: { code: string; capacity: string }) {
   return (
     <div className="flex h-72 w-full flex-col items-center justify-center gap-1 bg-cue-stone-100 sm:h-96">
       <span className="font-display text-5xl text-cue-navy-600">{code}</span>
-      <span className="text-sm text-cue-stone-500">{capacity} seats</span>
+      <span className="text-sm text-cue-stone-500">{capacity}</span>
     </div>
   );
 }
 
-/** Main photo + up to 2 clickable thumbnails. Falls back to the room-code placeholder if every photo fails to load or none exist. */
+/**
+ * Main photo + clickable thumbnails. Landscape shots fill the frame; portrait shots are shown
+ * whole (object-contain) over a blurred copy of themselves so they are never awkwardly cropped.
+ * Falls back to the room-code placeholder if every photo fails to load or none exist.
+ */
 function RoomGallery({ space }: { space: SpacePublic }) {
-  const photos = useMemo(() => space.photos.slice(0, 3), [space.photos]);
+  const photos = useMemo(() => space.photos.slice(0, MAX_GALLERY_PHOTOS), [space.photos]);
   const [active, setActive] = useState(0);
   const [errored, setErrored] = useState<Record<number, boolean>>({});
+  const [portrait, setPortrait] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setActive(0);
@@ -69,36 +94,63 @@ function RoomGallery({ space }: { space: SpacePublic }) {
 
   const allErrored = photos.length === 0 || photos.every((_, i) => errored[i]);
   if (allErrored) {
-    return <RoomPlaceholder code={roomCode(space)} capacity={space.capacity} />;
+    return <RoomPlaceholder code={roomCode(space)} capacity={capacityLabel(space)} />;
   }
 
   const activeIndex = errored[active] ? photos.findIndex((_, i) => !errored[i]) : active;
   const activePhoto = photos[activeIndex];
+  const isPortrait = activePhoto ? portrait[activePhoto.url] : false;
 
   return (
     <div>
       {activePhoto && !errored[activeIndex] ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={activePhoto.url}
-          alt={activePhoto.alt || space.title}
-          className="h-72 w-full object-cover sm:h-96"
-          onError={() => setErrored((e) => ({ ...e, [activeIndex]: true }))}
-        />
+        <div
+          className="relative h-72 w-full overflow-hidden bg-cue-navy-600 sm:h-[28rem]"
+          data-testid="gallery-main"
+        >
+          {isPortrait && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={activePhoto.url}
+              alt=""
+              aria-hidden
+              className="absolute inset-0 h-full w-full scale-110 object-cover opacity-60 blur-2xl"
+            />
+          )}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            key={activePhoto.url}
+            src={activePhoto.url}
+            alt={activePhoto.alt || space.title}
+            data-orientation={isPortrait ? "portrait" : "landscape"}
+            className={`relative h-full w-full ${isPortrait ? "object-contain" : "object-cover object-center"}`}
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              const tall = img.naturalHeight > img.naturalWidth;
+              setPortrait((m) => (m[activePhoto.url] === tall ? m : { ...m, [activePhoto.url]: tall }));
+            }}
+            onError={() => setErrored((e) => ({ ...e, [activeIndex]: true }))}
+          />
+          {photos.length > 1 && (
+            <span className="absolute bottom-3 right-3 rounded-full bg-cue-navy-600/80 px-2.5 py-1 text-xs font-medium text-white">
+              {activeIndex + 1} / {photos.length}
+            </span>
+          )}
+        </div>
       ) : (
-        <RoomPlaceholder code={roomCode(space)} capacity={space.capacity} />
+        <RoomPlaceholder code={roomCode(space)} capacity={capacityLabel(space)} />
       )}
       {photos.length > 1 && (
-        <div className="flex gap-2 border-t border-cue-stone-200 bg-cue-stone-100 p-2">
+        <div className="flex gap-2 overflow-x-auto border-t border-cue-stone-200 bg-cue-stone-100 p-2">
           {photos.map((p, i) =>
             errored[i] ? null : (
               <button
                 key={`${p.url}-${i}`}
                 type="button"
                 onClick={() => setActive(i)}
-                aria-label={`Show photo ${i + 1}`}
+                aria-label={`Show photo ${i + 1}${p.alt ? `: ${p.alt}` : ""}`}
                 aria-current={i === activeIndex}
-                className={`h-14 w-20 shrink-0 overflow-hidden rounded-tile border-2 ${
+                className={`h-14 w-20 shrink-0 overflow-hidden rounded-tile border-2 sm:h-16 sm:w-24 ${
                   i === activeIndex ? "border-cue-copper-600" : "border-transparent"
                 }`}
               >
@@ -106,7 +158,8 @@ function RoomGallery({ space }: { space: SpacePublic }) {
                 <img
                   src={p.url}
                   alt=""
-                  className="h-full w-full object-cover"
+                  loading="lazy"
+                  className="h-full w-full object-cover object-center"
                   onError={() => setErrored((e) => ({ ...e, [i]: true }))}
                 />
               </button>
@@ -119,7 +172,11 @@ function RoomGallery({ space }: { space: SpacePublic }) {
 }
 
 const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
-const stripePromise = publishableKey ? loadStripe(publishableKey) : null;
+/** Stripe Connect (direct charges): the platform pk plus the connected account, so Elements confirms on that account. */
+const connectedAccountId = (process.env.NEXT_PUBLIC_STRIPE_CONNECTED_ACCOUNT_ID ?? "").trim();
+const stripePromise = publishableKey
+  ? loadStripe(publishableKey, connectedAccountId ? { stripeAccount: connectedAccountId } : undefined)
+  : null;
 /** Test or mock mode is the only supported mode today — live keys are refused server-side. */
 const isTestOrMockStripe = !publishableKey || publishableKey.startsWith("pk_test_");
 
@@ -148,10 +205,6 @@ function normalizeTime(value: string): string {
   return v;
 }
 
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
 /** Half-hour slots 07:00–18:00 (Cue bookable window). */
 const TIME_OPTIONS: string[] = Array.from({ length: 23 }, (_, i) => {
   const minutes = 7 * 60 + i * 30;
@@ -169,10 +222,14 @@ function addMinutesToTime(hhmm: string, minutesToAdd: number): string {
 }
 
 function PaymentConfirmPanel({
+  bookingId,
+  totalCents,
   onSuccess,
   onError,
 }: {
-  onSuccess: (message: string) => void;
+  bookingId: string;
+  totalCents: number | null | undefined;
+  onSuccess: (message: string, confirmationUrl?: string) => void;
   onError: (message: string) => void;
 }) {
   const stripe = useStripe();
@@ -189,25 +246,28 @@ function PaymentConfirmPanel({
         redirect: "if_required",
       });
       if (error) {
-        onError(error.message || "Payment confirmation failed");
+        onError(error.message || "We couldn't place the hold on your card.");
         return;
       }
       const status = paymentIntent?.status ?? "unknown";
-      if (
-        status === "requires_capture" ||
-        status === "succeeded" ||
-        status === "processing"
-      ) {
+      if (status === "requires_capture") {
+        // The request (and the host alert + guest email) only goes in once the server has
+        // confirmed the authorized hold with Stripe.
+        const res = await fetch(`/api/v1/bookings/${bookingId}/authorize`, { method: "POST" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          onError(data.message || "The hold was placed on your card, but we couldn't submit the request.");
+          return;
+        }
         onSuccess(
-          status === "requires_capture"
-            ? "Card authorized. Host accept will capture the hold."
-            : `Payment ${status}.`
+          "Hold placed and request sent. Your card is only charged if we confirm your booking.",
+          typeof data.confirmationUrl === "string" ? data.confirmationUrl : undefined
         );
       } else {
-        onError(`Unexpected payment status: ${status}`);
+        onError(`Unexpected card hold status: ${status}`);
       }
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Payment confirmation failed");
+      onError(err instanceof Error ? err.message : "We couldn't place the hold on your card.");
     } finally {
       setConfirming(false);
     }
@@ -222,8 +282,9 @@ function PaymentConfirmPanel({
         fullWidth
         onClick={() => void handleConfirm()}
         disabled={!stripe || !elements || confirming}
+        data-testid="request-hold-button"
       >
-        {confirming ? "Confirming…" : "Confirm Payment"}
+        {confirming ? "Placing hold…" : holdButtonLabel(totalCents)}
       </Button>
     </div>
   );
@@ -231,6 +292,7 @@ function PaymentConfirmPanel({
 
 export default function SpacePage() {
   const params = useParams();
+  const router = useRouter();
   const slug = typeof params.slug === "string" ? params.slug : "";
   const [space, setSpace] = useState<SpacePublic | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -238,7 +300,7 @@ export default function SpacePage() {
   const [endDate, setEndDate] = useState(() => nextWeekdayChicago());
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("11:00");
-  const [parking, setParking] = useState(false);
+  const [parkingPasses, setParkingPasses] = useState(0);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [guestName, setGuestName] = useState("");
@@ -247,7 +309,14 @@ export default function SpacePage() {
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   /** The booking hold + its Stripe PaymentIntent — created inline, in the same card, once the quote and guest fields are valid. */
-  const [hold, setHold] = useState<{ bookingId: string; clientSecret: string } | null>(null);
+  const [hold, setHold] = useState<{ bookingId: string; clientSecret: string; totalCents: number } | null>(null);
+  /** Only the newest quote response may land (an older, slower one must not overwrite it). */
+  const quoteSeqRef = useRef(0);
+  /** Idempotency key for the current checkout attempt; renewed after "Change details". */
+  const requestKeyRef = useRef<string>(newRequestKey());
+  /** Synchronous guard so a fast double click can't fire two create calls before re-render. */
+  const submittingRef = useRef(false);
+  const [discarding, setDiscarding] = useState(false);
   const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
 
@@ -261,6 +330,17 @@ export default function SpacePage() {
       .then((s) => setSpace(s))
       .catch((e) => setError(e.message));
   }, [slug]);
+
+  // Arriving with /spaces/<slug>#reserve (e.g. from a home card): the form renders only after the
+  // space loads, so the browser's own hash jump has nothing to land on. Do it once it exists.
+  const didHashScrollRef = useRef(false);
+  useEffect(() => {
+    if (!space || didHashScrollRef.current) return;
+    const h = window.location.hash;
+    if (h !== `#${RESERVE_ANCHOR}` && h !== "#booking") return;
+    didHashScrollRef.current = true;
+    requestAnimationFrame(() => scrollToReserve({ smooth: false }));
+  }, [space]);
 
   // Keep the end date from drifting before the start date when the guest edits the start date.
   useEffect(() => {
@@ -305,10 +385,8 @@ export default function SpacePage() {
 
   const refreshQuote = useCallback(async () => {
     if (!space || !windowIso || hold) return;
+    const seq = ++quoteSeqRef.current;
     setQuoteError(null);
-    const addons = parking
-      ? [{ addonId: space.addons[0]?.id, quantity: 1 }]
-      : [];
     const res = await fetch(`/api/v1/spaces/${space.id}/quotes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -316,35 +394,26 @@ export default function SpacePage() {
         startsAt: windowIso.startsAt,
         endsAt: windowIso.endsAt,
         endDate: windowIso.endDate,
-        addons: addons.filter((a) => a.addonId),
+        parkingPasses,
       }),
     });
     const data = await res.json();
+    if (seq !== quoteSeqRef.current) return; // superseded by a newer quote request
     if (!res.ok) {
       setQuote(null);
       setQuoteError(data.message || data.error);
       return;
     }
     setQuote(data);
-  }, [space, windowIso, parking, hold]);
+  }, [space, windowIso, parkingPasses, hold]);
 
   useEffect(() => {
     if (windowIso && space && !hold) void refreshQuote();
-  }, [windowIso, space, parking, hold, refreshQuote]);
-
-  const canCreateHold =
-    !!space &&
-    !!windowIso &&
-    !!quote &&
-    !quoteError &&
-    !hold &&
-    !submitting &&
-    guestName.trim().length > 0 &&
-    isValidEmail(guestEmail);
+  }, [windowIso, space, parkingPasses, hold, refreshQuote]);
 
   async function createHold(e?: FormEvent | MouseEvent) {
     e?.preventDefault();
-    if (!space || !windowIso || hold || submitting) return;
+    if (!space || !windowIso || hold || submitting || submittingRef.current) return;
     if (!date) {
       setError("Pick a date.");
       return;
@@ -365,14 +434,12 @@ export default function SpacePage() {
       setError("Fix the date/time above to get a quote first.");
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     setError(null);
     setPaymentMessage(null);
     setPaymentError(null);
     try {
-      const addons = parking
-        ? [{ addonId: space.addons[0]?.id, quantity: 1 }]
-        : [];
       const res = await fetch("/api/v1/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -381,9 +448,10 @@ export default function SpacePage() {
           startsAt: windowIso.startsAt,
           endsAt: windowIso.endsAt,
           endDate: windowIso.endDate,
-          addons: addons.filter((a) => a.addonId),
+          parkingPasses,
           guestNotes: notes,
           guest: { name: guestName, email: guestEmail, phone: guestPhone || undefined },
+          clientRequestKey: requestKeyRef.current,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -392,17 +460,35 @@ export default function SpacePage() {
           data.message || data.error || `Booking failed (HTTP ${res.status})`
         );
       }
-      setHold({ bookingId: data.booking.id, clientSecret: data.stripe.clientSecret });
+      // The hold amount is whatever the server actually authorized for this booking.
+      setHold({
+        bookingId: data.booking.id,
+        clientSecret: data.stripe.clientSecret,
+        totalCents: Number(data.booking.totalCents),
+      });
+      // Demo mode authorizes straight away; go to the "Request received" page like a real checkout.
+      if (typeof data.confirmationUrl === "string") router.push(data.confirmationUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Booking failed");
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
 
-  /** Skip the click on "Continue to payment" entirely when the guest finishes email last. */
-  function handleEmailBlur() {
-    if (canCreateHold) void createHold();
+  /** "Change details": drop the unpaid draft (cancels its PaymentIntent) and unlock the form. */
+  async function changeDetails() {
+    if (!hold || paymentMessage || discarding) return;
+    setDiscarding(true);
+    try {
+      await fetch(`/api/v1/bookings/${hold.bookingId}/discard`, { method: "POST" }).catch(() => undefined);
+    } finally {
+      requestKeyRef.current = newRequestKey();
+      setHold(null);
+      setPaymentError(null);
+      setError(null);
+      setDiscarding(false);
+    }
   }
 
   if (error && !space) {
@@ -418,28 +504,30 @@ export default function SpacePage() {
 
   return (
     <>
-      {/* Hero */}
+      {/* Hero — compact single-row banner on desktop, stacked on mobile */}
       <FullBleed className="-mt-10 bg-cue-navy-700">
-        <div className="mx-auto max-w-[920px] px-4 py-16 sm:px-6 sm:py-24">
-          <p className="cue-eyebrow text-cue-copper-300">
-            {space.location ? `${space.location.city} · ${space.location.name}` : space.city}
-          </p>
-          <h1 className="mt-3 max-w-xl text-[clamp(32px,4.2vw,48px)] text-white">{space.title}</h1>
-          <p className="mt-4 flex items-center gap-1.5 text-white/85">
-            <Users aria-hidden className="h-4 w-4" />
-            {space.capacity} seats · {space.location?.name ?? space.city}
-          </p>
-          <p className="mt-1 text-lg text-white/90">
-            {formatRate(space.pricing.baseHourlyCents)} / hr · {space.pricing.minHours}-hr minimum
-          </p>
-          {discountPct > 0 && (
-            <p className="mt-1 text-sm text-cue-copper-300">
-              {discountPct}% off {space.pricing.longBookingThresholdHours}+ hours
+        <div className="mx-auto flex max-w-[920px] flex-col gap-3 px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-6">
+          <div>
+            <p className="cue-eyebrow text-cue-copper-300">
+              {space.location ? `${space.location.city} · ${space.location.name}` : space.city}
             </p>
-          )}
-          <a href="#booking" className={buttonClasses("accent", "mt-8 inline-flex rounded-full px-8")}>
-            Reserve
-          </a>
+            <h1 className="mt-1 text-[clamp(20px,2.6vw,28px)] text-white">{space.title}</h1>
+            <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-white/85">
+              <span className="flex items-center gap-1.5">
+                <Users aria-hidden className="h-4 w-4" />
+                {capacityLabel(space)}
+              </span>
+              <span>
+                {formatRate(space.pricing.baseHourlyCents)} / hr · {space.pricing.minHours}-hr minimum
+              </span>
+              {discountPct > 0 && (
+                <span className="text-cue-copper-300">
+                  {discountPct}% off {space.pricing.longBookingThresholdHours}+ hours
+                </span>
+              )}
+            </p>
+          </div>
+          <RequestToBookButton className="rounded-full px-8" testId="request-to-book-hero" />
         </div>
       </FullBleed>
 
@@ -458,7 +546,7 @@ export default function SpacePage() {
                   {space.description}
                 </p>
               </div>
-              <Badge tone="navy">Request to book</Badge>
+              <RequestToBookButton testId="request-to-book-about" />
             </div>
             <div className="flex flex-wrap gap-2">
               <span className="cue-chip">
@@ -475,20 +563,43 @@ export default function SpacePage() {
             {space.amenities.length > 0 && (
               <div>
                 <h3 className="mb-3 text-sm font-semibold text-cue-navy-600">Amenities</h3>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
                   {space.amenities.map((a) => (
                     <AmenityTile key={a.key} amenityKey={a.key} label={a.label} />
                   ))}
                 </div>
               </div>
             )}
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              <div>
+                <h3 className="mb-2 text-sm font-semibold text-cue-navy-600">Parking</h3>
+                <p className="text-sm leading-relaxed text-cue-stone-700">
+                  Parking is not available under the building unless pre-booked. Public parking
+                  is across the street at{" "}
+                  <a href={PARKING_MAPS_URL} target="_blank" rel="noopener noreferrer">
+                    720 N. Ervay St, Dallas, TX 75201
+                  </a>
+                  .
+                </p>
+              </div>
+              <div>
+                <h3 className="mb-2 text-sm font-semibold text-cue-navy-600">Food &amp; drinks</h3>
+                <p className="text-sm leading-relaxed text-cue-stone-700">
+                  Outside food welcome. Feel free to have food delivered or catered; Mendocino
+                  Farms is just down the street.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </FullBleed>
 
       {/* Booking */}
       <FullBleed className="bg-cue-stone-100">
-        <div id="booking" className="mx-auto max-w-[760px] scroll-mt-24 px-4 py-14 sm:px-6">
+        {/* Legacy #booking links still land here. */}
+        <span id="booking" aria-hidden className="block scroll-mt-[74px]" />
+        {/* #reserve: scroll-margin-top equals the 74px sticky header; the section padding gives the space (works without JS too). */}
+        <div id={RESERVE_ANCHOR} className="mx-auto max-w-[760px] scroll-mt-[74px] px-4 py-14 sm:px-6">
           <form
             noValidate
             onSubmit={createHold}
@@ -508,6 +619,7 @@ export default function SpacePage() {
                 onChange={(e) => setDate(e.target.value)}
                 className="cue-input"
                 aria-label="Date"
+                data-reserve-first-field
               />
             </label>
             <label className="block text-sm">
@@ -560,23 +672,24 @@ export default function SpacePage() {
           <p className="text-xs text-cue-stone-500">
             20% off for 8+ hours (whole reservation){isMultiDay ? " — each weekday in range is billed." : ""}
           </p>
-          {space.addons[0] && (
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={parking}
-                disabled={fieldsLocked}
-                onChange={(e) => setParking(e.target.checked)}
-                className="mt-1"
-              />
-              <span>
-                <span className="font-medium text-cue-ink">{space.addons[0].name}</span>
-                <span className="block text-xs text-cue-stone-500">
-                  {money(space.addons[0].priceCents)}/day
-                </span>
-              </span>
-            </label>
-          )}
+          <label className="block text-sm">
+            <span className="block text-cue-stone-500">
+              Reserved parking under the building, $20 per person per day
+            </span>
+            <select
+              value={parkingPasses}
+              disabled={fieldsLocked}
+              onChange={(e) => setParkingPasses(Number(e.target.value))}
+              className="cue-input mt-1 w-full sm:w-56"
+              aria-label="Number of parking passes"
+            >
+              {Array.from({ length: 21 }, (_, n) => (
+                <option key={n} value={n}>
+                  {n === 0 ? "No parking" : `${n} pass${n === 1 ? "" : "es"}`}
+                </option>
+              ))}
+            </select>
+          </label>
           <div
             data-testid="quote-panel"
             className="rounded-tile bg-cue-stone-100 p-3 text-sm"
@@ -621,7 +734,6 @@ export default function SpacePage() {
               value={guestEmail}
               disabled={fieldsLocked}
               onChange={(e) => setGuestEmail(e.target.value)}
-              onBlur={handleEmailBlur}
               className="cue-input"
             />
           </label>
@@ -647,9 +759,7 @@ export default function SpacePage() {
           {error && <Alert tone="danger">{error}</Alert>}
           {!hold ? (
             <>
-              <p className="text-xs text-cue-stone-500">
-                Free cancellation up to 48 hours before your booking. No refund after that.
-              </p>
+              <HoldNotice totalCents={quote?.totalCents} />
               <Button
                 type="button"
                 variant="accent"
@@ -657,28 +767,36 @@ export default function SpacePage() {
                 onClick={(e) => void createHold(e)}
                 disabled={submitting || !quote}
               >
-                {submitting ? "Placing hold…" : "Continue to payment"}
+                {submitting ? "Preparing secure card form…" : "Continue to card details"}
               </Button>
             </>
           ) : (
             <div data-testid="hold-panel" className="space-y-3 border-t border-cue-stone-200 pt-4">
               <div className="flex items-center justify-between gap-2">
                 <span className="flex items-center gap-2">
-                  <Badge tone="warning">Hold placed</Badge>
-                  <span className="text-xs text-cue-stone-500">awaiting host</span>
+                  {paymentMessage || isMockSecret(hold.clientSecret) ? (
+                    <>
+                      <Badge tone="warning">Hold placed</Badge>
+                      <span className="text-xs text-cue-stone-500">awaiting host</span>
+                    </>
+                  ) : (
+                    <>
+                      <Badge tone="neutral">Card needed</Badge>
+                      <span className="text-xs text-cue-stone-500">request not sent yet</span>
+                    </>
+                  )}
                 </span>
-                <span className="text-sm font-semibold text-cue-navy-600">
-                  {quote ? money(quote.totalCents) : ""}
-                </span>
+                <span className="text-sm font-semibold text-cue-navy-600">{money(hold.totalCents)}</span>
               </div>
-              <p className="text-xs text-cue-stone-500">
-                Staff respond within 24 hours; if not, your hold is released automatically. Free
-                cancellation up to 48 hours before your booking — no refund after that.
-              </p>
+              {quote && quote.parkingCents > 0 && (
+                <p className="text-xs text-cue-stone-500">
+                  Includes parking: {quote.parkingPasses} pass{quote.parkingPasses === 1 ? "" : "es"} ·{" "}
+                  {money(quote.parkingCents)}
+                </p>
+              )}
               {paymentMessage ? (
-                <Alert tone="success" title="Payment confirmed">
-                  {paymentMessage} Free cancellation up to 48 hours before your booking; no refund
-                  after that.
+                <Alert tone="success" title="Hold placed – request sent">
+                  {paymentMessage}
                 </Alert>
               ) : isMockSecret(hold.clientSecret) ? (
                 <p className="text-sm text-cue-stone-600">
@@ -695,10 +813,11 @@ export default function SpacePage() {
                   cannot load Stripe Payment Element.
                 </Alert>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
+                  <HoldNotice totalCents={hold.totalCents} />
                   <p className="flex items-center gap-2 text-sm font-semibold text-cue-navy-600">
                     <CreditCard aria-hidden className="h-4 w-4" />
-                    Pay to confirm your request
+                    Card for the hold
                   </p>
                   <Elements
                     stripe={stripePromise}
@@ -708,9 +827,12 @@ export default function SpacePage() {
                     }}
                   >
                     <PaymentConfirmPanel
-                      onSuccess={(msg) => {
+                      bookingId={hold.bookingId}
+                      totalCents={hold.totalCents}
+                      onSuccess={(msg, confirmationUrl) => {
                         setPaymentMessage(msg);
                         setPaymentError(null);
+                        if (confirmationUrl) router.push(confirmationUrl);
                       }}
                       onError={(msg) => {
                         setPaymentError(msg || null);
@@ -720,6 +842,16 @@ export default function SpacePage() {
                 </div>
               )}
               {paymentError && <Alert tone="danger">{paymentError}</Alert>}
+              {!paymentMessage && !isMockSecret(hold.clientSecret) && (
+                <button
+                  type="button"
+                  onClick={() => void changeDetails()}
+                  disabled={discarding}
+                  className="text-sm font-medium text-cue-copper-600 underline-offset-2 hover:underline disabled:opacity-50"
+                >
+                  {discarding ? "Reopening…" : "Change date, time or details"}
+                </button>
+              )}
               <p className="break-all text-xs text-cue-stone-400">Booking: {hold.bookingId}</p>
             </div>
           )}
@@ -729,7 +861,7 @@ export default function SpacePage() {
 
       {/* House rules, billing & cancellation */}
       {(space.hostRulesMd || space.cancellationPolicy) && (
-        <FullBleed className="-mb-10 bg-cue-paper">
+        <FullBleed className="bg-cue-paper">
           <div className="mx-auto max-w-[920px] space-y-4 px-4 py-14 sm:px-6">
             {space.hostRulesMd && <HouseRules markdown={space.hostRulesMd} />}
             {space.cancellationPolicy && (
@@ -742,6 +874,17 @@ export default function SpacePage() {
           </div>
         </FullBleed>
       )}
+
+      {/* Questions / contact */}
+      <FullBleed className="-mb-10 bg-white">
+        <div className="mx-auto max-w-[920px] space-y-4 px-4 py-14 sm:px-6">
+          <h2 className="text-2xl">Questions?</h2>
+          <p className="text-sm text-cue-stone-700">
+            D&apos;Arcy Young — <a href="tel:+12148834174">214-883-4174</a>, or stop by suite 212.
+          </p>
+          <ContactForm roomName={space.title} roomSlug={space.slug} />
+        </div>
+      </FullBleed>
     </>
   );
 }

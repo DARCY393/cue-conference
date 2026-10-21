@@ -3,7 +3,7 @@ import { getStore, isDemoMode } from "./store";
 import { query } from "./db";
 import type { BusyInterval, LocationPublic, SpacePublic } from "./types";
 import { CANCELLATION_RULES } from "./seed";
-import { toPublicSpaceJson } from "./space-public";
+import { MAX_GALLERY_PHOTOS, toPublicSpaceJson } from "./space-public";
 
 type SpaceRow = {
   id: string;
@@ -16,6 +16,7 @@ type SpaceRow = {
   neighborhood: string | null;
   timezone: string;
   capacity: number;
+  seated_capacity: number | null;
   status: string;
   min_hours: string;
   base_hourly_cents: number;
@@ -69,8 +70,8 @@ async function hydrateSpace(s: SpaceRow): Promise<SpacePublic> {
       [s.id]
     ),
     query<{ url: string; alt: string | null; sort_order: number }>(
-      `SELECT url, alt, sort_order FROM space_photos WHERE space_id = $1 ORDER BY sort_order LIMIT 3`,
-      [s.id]
+      `SELECT url, alt, sort_order FROM space_photos WHERE space_id = $1 ORDER BY sort_order LIMIT $2`,
+      [s.id, MAX_GALLERY_PHOTOS]
     ),
   ]);
 
@@ -98,6 +99,7 @@ async function hydrateSpace(s: SpaceRow): Promise<SpacePublic> {
     neighborhood: s.neighborhood ?? undefined,
     timezone: s.timezone,
     capacity: s.capacity,
+    seatedCapacity: s.seated_capacity ?? undefined,
     status: s.status as SpacePublic["status"],
     pricing: {
       currency: "usd",

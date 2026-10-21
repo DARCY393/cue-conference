@@ -2,6 +2,8 @@ import { defineConfig } from "vitest/config";
 import path from "path";
 
 export default defineConfig({
+  // Next's tsconfig uses jsx: preserve; tests that render components need the automatic runtime.
+  esbuild: { jsx: "automatic" },
   test: {
     environment: "node",
     include: ["__tests__/**/*.test.ts"],

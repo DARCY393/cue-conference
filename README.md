@@ -36,7 +36,7 @@ Visual-only restyle — booking logic, Stripe Payment Element, and validation ar
 | Minimum | 1 hour per room (`minHours` in `lib/seed.ts`) — enforced server-side (quote + booking APIs) |
 | Long booking discount | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
 | Overtime | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
-| Parking addon | **Removed** (off by default) — see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) |
+| Parking | $20/person/day reserved parking under the building, 0–20 passes, guest-selected on the room page. Always on — not the legacy addon-catalog mechanism (see [`docs/REMOVED_FEATURES.md`](./docs/REMOVED_FEATURES.md) #3), priced/stored on `bookings.parking_passes`/`parking_cents` (migration `014`), excluded from the 20% long-booking discount |
 | Hours | Mon–Fri 7:00–18:00 |
 | Flow | Request-to-book + host accept/decline |
 | Cancel | Standard — free up to 48h before start, no refund after; host has 24h to respond or the hold auto-releases (`npm run bookings:expire` / cron) |
@@ -285,7 +285,7 @@ Put the printed `whsec_…` into `STRIPE_WEBHOOK_SECRET` and restart the app. Fo
 npm run db:migrate
 ```
 
-Migrations live in `migrations/001_…` … `013_standard_cancellation_policy.sql` (see `migrations/README.md`).
+Migrations live in `migrations/001_…` … `014_parking_and_reminders.sql` (see `migrations/README.md`).
 
 3. Set `STRIPE_SECRET_KEY` and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (and optionally `STRIPE_WEBHOOK_SECRET`). See **Stripe test mode checklist** below.
 4. `npm run dev`
@@ -304,6 +304,61 @@ Webhook endpoint: `POST /api/v1/webhooks/stripe`.
 
 Without Stripe keys, bookings still work with mock `*_secret_mock` client secrets (demo mode banner on the guest form).
 
+## Booking flow: nothing is sent until the card is authorized
+
+1. Filling in the form (including leaving the email field) only fetches price quotes. Nothing is stored.
+2. **Continue to payment** creates a `draft` booking and a manual-capture PaymentIntent. The browser sends a
+   per-attempt `clientRequestKey`, so a double click or retry returns the same draft. Drafts hold no
+   inventory, send no email, and are hidden from staff.
+3. After `stripe.confirmPayment` reports `requires_capture`, the browser calls
+   `POST /api/v1/bookings/:id/authorize`. The server re-checks the PaymentIntent with Stripe (status and amount)
+   and the slot, then promotes the draft to `requested` and sends the guest "request received" email and the
+   host alert, exactly once. The `payment_intent.amount_capturable_updated` webhook does the same if the tab closes.
+4. **Change date, time or details** (`POST /api/v1/bookings/:id/discard`) cancels the draft's PaymentIntent and
+   unlocks the form. Drafts not authorized within 30 minutes are expired by the expiry job, with the PI cancelled.
+
+## Stripe Connect (Honeycomb platform fee) — optional, OFF by default
+
+Honeycomb's Stripe account is the **platform**; the SPP/Cue Stripe account is the
+**connected account**. With Connect on, the app uses the platform secret key and
+sends every call with `Stripe-Account: <connected acct>` (direct charges):
+
+- Booking hold: manual-capture PaymentIntent with
+  `application_fee_amount = round(APPLICATION_FEE_BPS × charged amount / 10000)`
+  (default 1000 bps = 10%, parking and add-ons included). The fee is collected on
+  capture; a decline, cancel or 24h auto-decline cancels the PI and releases it.
+- Overtime/damage off-session PaymentIntents get the same fee on the full amount.
+- Refunds pass `refund_application_fee: true`, so Honeycomb's fee is returned pro rata.
+- `APPLICATION_FEE_ROOM_ONLY=true` bases the booking fee on room time only
+  (room subtotal after the long-booking discount, no parking/add-ons).
+- Every PI keeps the Cue Arts District Conference Room tags (metadata
+  `business=cue_arts_district_conference_room`, description, and
+  `statement_descriptor_suffix` `CUE ARTS DIST`).
+
+Setup (test mode first):
+
+1. In Honeycomb's Stripe dashboard (test mode) enable Connect and finish the platform profile.
+2. Connect the SPP/Cue account. Either:
+   - **Existing SPP account (Standard):** create an OAuth link from Settings → Connect →
+     Onboarding options (OAuth) and have D'Arcy approve it while signed in to the SPP
+     account, or create an account link for it; or
+   - **Test only:** create a test connected account
+     (`POST /v1/accounts` with `type=standard` or `type=express`) and complete its
+     onboarding link with Stripe's test data.
+3. Set in the env file: `STRIPE_PLATFORM_SECRET_KEY` (Honeycomb sk_test_),
+   `STRIPE_CONNECTED_ACCOUNT_ID` and `NEXT_PUBLIC_STRIPE_CONNECTED_ACCOUNT_ID` (acct_…),
+   `APPLICATION_FEE_BPS=1000`, and switch `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` to
+   **Honeycomb's** pk_test_. NEXT_PUBLIC_* values are baked in at build time, so rebuild.
+4. Webhooks: add a **Connect** endpoint on the platform ("Listen to events on Connected
+   accounts") pointing at `/api/v1/webhooks/stripe` and put its signing secret in
+   `STRIPE_CONNECT_WEBHOOK_SECRET`. The route verifies with either secret; Connect events
+   for any account other than `STRIPE_CONNECTED_ACCOUNT_ID` are acknowledged and ignored.
+5. Going live needs D'Arcy's explicit approval (`ALLOW_STRIPE_LIVE=true` plus live keys).
+
+To turn Connect off, remove `STRIPE_PLATFORM_SECRET_KEY` / `STRIPE_CONNECTED_ACCOUNT_ID`,
+restore the SPP pk_test_ and rebuild. Note: PaymentIntents created under Connect live on the
+connected account, so capture/refund of those needs Connect to stay on until they settle.
+
 ## Scripts
 
 | Script | Description |
@@ -316,7 +371,8 @@ Without Stripe keys, bookings still work with mock `*_secret_mock` client secret
 | `npm run db:migrate:009` | One-shot apply `009_locations.sql` only |
 | `npm run db:migrate:010` | One-shot apply `010_arts_district_rooms.sql` only |
 | `npm run staff:create` | Upsert one staff account (`STAFF_EMAIL`/`STAFF_NAME`/`STAFF_PASSWORD` env, or a hidden password prompt) |
-| `npm run bookings:expire` | Auto-decline "requested" bookings past their 24h host response window, releasing each hold — run on a cron |
+| `npm run bookings:expire` | Auto-decline "requested" bookings past their 24h host response window (releasing each hold) and send due 24h-before-start reminders — run on a cron |
+| `npm run email:preview` | Write a sample confirmation email's rendered HTML to `/workspace/tmp/email-confirmation.html` |
 
 ## API
 
@@ -344,7 +400,8 @@ OpenAPI: [`openapi.yaml`](./openapi.yaml). Routes are mounted under **`/api/v1`*
 | POST | `/api/v1/staff/logout` | Clears the session |
 | GET | `/api/v1/staff/me` | Current staff user, or 401 |
 | POST | `/api/v1/webhooks/stripe` | Stripe events |
-| POST | `/api/v1/internal/expire-requests` | Cron target — auto-decline overdue `requested` bookings, release each hold |
+| POST | `/api/v1/internal/expire-requests` | Cron target — auto-decline overdue `requested` bookings, release each hold, send due reminders |
+| POST | `/api/contact` | Room-page "Questions?" form — not versioned under `/api/v1` |
 
 ### Auth
 
@@ -354,7 +411,40 @@ OpenAPI: [`openapi.yaml`](./openapi.yaml). Routes are mounted under **`/api/v1`*
 
 ### Email
 
-`lib/email.ts` exposes a `ConsoleEmailLogger` — messages are printed as JSON to the server console.
+`lib/email.ts` sends real email via SMTP (`nodemailer`) once `SMTP_HOST`,
+`SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `EMAIL_FROM` are all set (port
+`465` uses TLS; anything else uses STARTTLS). Without all five, it falls back
+to a `ConsoleEmailLogger` that prints `to`/`subject`/`template` (never the
+full HTML body) as JSON to the server console. Send failures are caught and
+logged — they never break the booking flow.
+
+Branded HTML + plain-text templates live in `lib/email-templates.ts`
+(navy header, "cue" wordmark, copper accent, Jost/Public Sans with web-safe
+fallbacks, table layout for email-client compatibility): booking request
+received, booking confirmed, 24h-before-start reminder, booking
+declined/cancelled/expired, and the host new-request notification. Arrival
+instructions (address, parking, Wi-Fi, amenities, D'Arcy's contact info) are
+centralized in `lib/arrival-instructions.ts`, shared by the HTML and text
+renderers — the Wi-Fi password only ever appears in these emails, never on
+the public room page. Preview the confirmation email's rendered HTML with
+`npx tsx scripts/render-email-preview.ts` (writes to
+`/workspace/tmp/email-confirmation.html`).
+
+Reminders: `lib/reminders.ts`'s `sendDueReminders()` finds accepted bookings
+starting within 24h that haven't been reminded yet, sends the reminder email,
+and stamps `reminder_sent_at` — idempotent, so re-running it (same cron tick
+or a retry) never double-sends. Called from both `npm run bookings:expire`
+and `POST /api/v1/internal/expire-requests`, right after the overdue-request
+expiry scan.
+
+### Contact form
+
+The room page's "Questions?" section posts to `POST /api/contact`
+(`app/api/contact/route.ts`), which validates `name`/`email`/`message`,
+silently no-ops on a filled honeypot field (`website`), rate-limits to 5
+requests per 10 minutes per IP (`x-forwarded-for`/`x-real-ip`), and emails
+`CONTACT_EMAIL` (default `darcy@thecue.work`) with `replyTo` set to the
+guest's address via the same `lib/email.ts` sender.
 
 ## Project layout
 
@@ -365,23 +455,29 @@ app/
   host/                 Host queue UI (redirects to /staff/login if signed out)
   staff/login/          Staff sign-in page
 lib/
-  features.ts           Removed-feature flags (discount/overtime/parking)
-  quote.ts              Hours, long discount, addons, overtime
+  features.ts           Removed-feature flags (discount/overtime/legacy parking addon)
+  quote.ts              Hours, long discount, addons, overtime, parking-passes pricing
   refund.ts             Flexible cancellation math
   availability.ts       Bookable hours + overlap helpers
   seed.ts               Demo-mode location/room data
   space-public.ts       Strips private fields before API responses
   store.ts              In-memory demo store (bookings, blockouts, staff users/sessions)
   bookings.ts           Booking lifecycle
+  reminders.ts           24h-before-start reminder emails (idempotent)
+  email.ts                SMTP (nodemailer) or console-log email sender
+  email-templates.ts      Branded HTML/text email renderers
+  arrival-instructions.ts Shared arrival/access instructions (email-only)
+  validate.ts             Small shared input validators (e.g. isValidEmail)
   stripe.ts             Stripe (test-mode only) or mock PI
   google-calendar.ts     Google Calendar sync (disabled/mock/live)
   password.ts            scrypt password hashing
   staff-auth.ts           Staff login/session/cookie logic (DB + in-memory)
 scripts/create-staff-user.ts  `npm run staff:create` CLI
+scripts/render-email-preview.ts  Writes a sample confirmation email's HTML to /workspace/tmp
 docs/REMOVED_FEATURES.md  Restore steps for removed pricing features
-migrations/              Raw SQL (001–013)
+migrations/              Raw SQL (001–014)
 openapi.yaml
-__tests__/          quote, refund, pricing, payment-hold, google-calendar, staff-auth unit tests
+__tests__/          quote, refund, pricing, payment-hold, google-calendar, staff-auth, reminders, contact, email-template unit tests
 ```
 
 ## Demo mode behavior
