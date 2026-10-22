@@ -2,7 +2,12 @@ import { randomUUID } from "crypto";
 import { calculateQuote, calculateOvertimeCents, computeAddonCents } from "./quote";
 import { calculateCancellationRefund, CANCELLATION_DEFAULT } from "./refund";
 import { expandDayWindows, isAvailable, totalWindowHours } from "./availability";
-import { isStartInPast, localDateString, START_IN_PAST_MESSAGE } from "./booking-window";
+import {
+  ACCEPT_START_PASSED_MESSAGE,
+  isStartInPast,
+  localDateString,
+  START_IN_PAST_MESSAGE,
+} from "./booking-window";
 import { getBusy, getSpaceById } from "./space-service";
 import { getStore, isDemoMode } from "./store";
 import { query } from "./db";
@@ -889,6 +894,10 @@ export async function acceptBooking(id: string) {
   if (!booking) return { error: "not_found" as const, message: "Booking not found", status: 404 };
   if (booking.status !== "requested") {
     return { error: "invalid_status" as const, message: "Booking is not requested", status: 409 };
+  }
+  // Never capture a hold for a slot whose start time has already passed (America/Chicago).
+  if (isStartInPast(new Date(booking.startsAt))) {
+    return { error: "start_in_past" as const, message: ACCEPT_START_PASSED_MESSAGE, status: 409 };
   }
   const startsAt = new Date(booking.startsAt);
   const endsAt = new Date(booking.endsAt);

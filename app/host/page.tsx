@@ -7,6 +7,7 @@ import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Alert } from "@/components/ui/Alert";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { formatMoney } from "@/lib/format";
+import { isAcceptable } from "@/lib/booking-window";
 
 function formatChicago(iso: string): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -121,6 +122,13 @@ export default function HostPage() {
     void load();
   }, [load]);
 
+  /** "Now", refreshed every minute so a request flips to not-acceptable once its start passes. */
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
   async function act(bookingId: string, action: "accept" | "decline") {
     setError(null);
     const res = await fetch(`/api/v1/host/bookings/${bookingId}/${action}`, {
@@ -232,6 +240,8 @@ export default function HostPage() {
         )}
         {bookings.map((b) => {
           const hold = holdStatus(b.status);
+          // A request whose start time has passed (CT) can't be accepted; only Decline is offered.
+          const startPassed = b.status === "requested" && !isAcceptable(b, now);
           const code = b.spaceShortTitle || b.spaceSlug?.split("-").pop() || b.spaceTitle || "Room";
           return (
             <div key={b.id} className="cue-card p-5">
@@ -254,20 +264,27 @@ export default function HostPage() {
                   <div className="flex items-center gap-2 pt-1">
                     <Badge tone="neutral">{b.status}</Badge>
                     <Badge tone={hold.tone}>{hold.label}</Badge>
+                    {startPassed && (
+                      <span data-testid={`start-passed-${b.id}`}>
+                        <Badge tone="warning">Start time passed — can&apos;t accept</Badge>
+                      </span>
+                    )}
                   </div>
                   <div className="break-all text-xs text-cue-stone-400">{b.id}</div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {b.status === "requested" && (
                     <>
-                      <Button
-                        type="button"
-                        variant="primary"
-                        data-testid={`accept-${b.id}`}
-                        onClick={() => act(b.id, "accept")}
-                      >
-                        Accept
-                      </Button>
+                      {!startPassed && (
+                        <Button
+                          type="button"
+                          variant="primary"
+                          data-testid={`accept-${b.id}`}
+                          onClick={() => act(b.id, "accept")}
+                        >
+                          Accept
+                        </Button>
+                      )}
                       <Button
                         type="button"
                         variant="ghost"

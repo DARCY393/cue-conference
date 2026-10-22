@@ -82,3 +82,17 @@ export function firstBookableDate(
   }
   return localDateString(now, timeZone);
 }
+
+export const ACCEPT_START_PASSED_MESSAGE =
+  "This request's start time has already passed, so it can't be accepted. Decline it to release the card hold.";
+
+/**
+ * Staff may accept a request only while its start time is still in the future
+ * (America/Chicago). Decline stays available so the hold can be released.
+ */
+export function isAcceptable(
+  booking: { status: string; startsAt: string },
+  now: Date = new Date()
+): boolean {
+  return booking.status === "requested" && !isStartInPast(new Date(booking.startsAt), now);
+}

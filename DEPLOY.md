@@ -565,3 +565,15 @@ isn't the app server itself). Requires `CRON_SECRET` set in
 
 Either path is idempotent and safe to run as often as you like — pick one,
 not both, to avoid double log noise.
+
+## Preview email subject prefix
+
+On the preview only, add this line to `/etc/cue-booking-preview/env` and restart
+`cue-booking-preview`:
+
+```
+CUE_APP_ENV=preview
+```
+
+Every outgoing email subject then starts with `[PREVIEW] `. Live
+(`/etc/cue-booking/env`) must not set it; unset means no prefix.

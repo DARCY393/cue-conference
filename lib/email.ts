@@ -83,13 +83,38 @@ let overrideSender: EmailSender | null = null;
 const consoleLogger = new ConsoleEmailLogger();
 let smtpSender: SmtpEmailSender | null = null;
 
-export function getEmailSender(): EmailSender {
+export const PREVIEW_SUBJECT_PREFIX = "[PREVIEW] ";
+
+/**
+ * Subject prefix for this deployment: "[PREVIEW] " when CUE_APP_ENV=preview, otherwise none
+ * (live and unset are unchanged). Lets staff tell preview test mail from real bookings.
+ */
+export function emailSubjectPrefix(): string {
+  return (process.env.CUE_APP_ENV || "").trim().toLowerCase() === "preview" ? PREVIEW_SUBJECT_PREFIX : "";
+}
+
+export function applySubjectPrefix(subject: string, prefix: string = emailSubjectPrefix()): string {
+  if (!prefix || subject.startsWith(prefix)) return subject;
+  return `${prefix}${subject}`;
+}
+
+function baseSender(): EmailSender {
   if (overrideSender) return overrideSender;
   if (smtpConfigured()) {
     if (!smtpSender) smtpSender = new SmtpEmailSender();
     return smtpSender;
   }
   return consoleLogger;
+}
+
+/** Every outgoing email goes through here, so the preview prefix applies to all of them. */
+export function getEmailSender(): EmailSender {
+  const sender = baseSender();
+  const prefix = emailSubjectPrefix();
+  if (!prefix) return sender;
+  return {
+    send: (message: EmailMessage) => sender.send({ ...message, subject: applySubjectPrefix(message.subject, prefix) }),
+  };
 }
 
 /** Test/override hook. Pass undefined/null to clear the override and resume env-based selection. */
