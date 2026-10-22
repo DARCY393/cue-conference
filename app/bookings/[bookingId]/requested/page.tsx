@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { CheckCircle2, Mail, ShieldCheck } from "lucide-react";
 import { ContactForm } from "@/components/ContactForm";
 import { getBookingById } from "@/lib/bookings";
-import { verifyBookingAccessToken } from "@/lib/booking-access";
+import { cancelPagePath, verifyBookingAccessToken } from "@/lib/booking-access";
 import { formatMoney } from "@/lib/format";
 import {
   CONTACT_NAME,
@@ -115,6 +115,8 @@ export default async function RequestedPage({
   const firstName = (booking.guestName || "").trim().split(/\s+/)[0];
   const note = STATUS_NOTE[booking.status];
   const isPending = booking.status === "requested";
+  const canCancel =
+    (booking.status === "requested" || booking.status === "accepted") && Date.parse(booking.startsAt) > Date.now();
 
   return (
     <>
@@ -206,6 +208,18 @@ export default async function RequestedPage({
                   {FREE_CANCELLATION_TEXT}
                 </span>
               </p>
+              {canCancel && (
+                <p className="mt-4 text-sm text-cue-stone-700">
+                  Plans changed?{" "}
+                  <a
+                    href={cancelPagePath(booking.id)}
+                    className="font-semibold text-cue-copper-600 underline underline-offset-2 hover:text-cue-copper-700"
+                    data-testid="requested-cancel-link"
+                  >
+                    Cancel booking
+                  </a>
+                </p>
+              )}
             </section>
           </div>
         </div>

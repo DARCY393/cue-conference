@@ -120,6 +120,21 @@ export interface BookingEmailParams {
   discountCents?: number;
   /** e.g. "Long booking discount (20%)". */
   discountLabel?: string;
+  /** Tokenized guest self-cancel link (see cancelPageUrl in lib/booking-access.ts). */
+  cancelUrl?: string;
+}
+
+function cancelLinkHtml(url: string | undefined, note: string): string {
+  if (!url) return "";
+  return `<div style="margin:4px 0 18px;">
+      <a href="${escapeHtml(url)}" style="display:inline-block;padding:10px 18px;border:1px solid ${COPPER};border-radius:8px;color:${COPPER};font-size:14px;font-weight:600;text-decoration:none;">Cancel booking</a>
+      <p style="margin:8px 0 0;font-size:12px;line-height:1.5;color:${STONE_LIGHT};">${escapeHtml(note)}</p>
+    </div>`;
+}
+
+function cancelLinkText(url: string | undefined, note: string): string[] {
+  if (!url) return [];
+  return ["", `Cancel booking: ${url}`, note];
 }
 
 function formatChicago(iso: string): string {
@@ -169,6 +184,11 @@ function summaryLinesText(params: BookingEmailParams, opts: { totalLabel?: strin
 const HOLD_TOTAL_LABEL = "Hold amount (not charged yet)";
 const CANCELLATION_POLICY_TEXT =
   "Free cancellation up to 48 hours before your booking starts. No refund after that.";
+const REQUEST_CANCEL_NOTE = "Need to cancel? Cancelling a request releases the card hold right away — you won't be charged.";
+const CONFIRMED_CANCEL_NOTE =
+  "Plans changed? Cancel at least 48 hours before your booking starts for a full refund. No refund after that.";
+const REMINDER_CANCEL_NOTE =
+  "Your booking starts within 48 hours, so cancelling now isn't refundable — but please still cancel so we can free the room.";
 
 export function renderBookingRequestedEmail(params: BookingEmailParams): RenderedEmail {
   // Subject deliberately says "request" and "card hold" — nothing has been charged.
@@ -193,6 +213,7 @@ export function renderBookingRequestedEmail(params: BookingEmailParams): Rendere
         )}.</strong> ${escapeHtml(s.body)}</li>`
     ).join("")}</ol>
     ${paragraphHtml(`Cancellation policy: ${CANCELLATION_POLICY_TEXT}`)}
+    ${cancelLinkHtml(params.cancelUrl, REQUEST_CANCEL_NOTE)}
     ${paragraphHtml(questions)}
   `;
   const text = [
@@ -208,6 +229,7 @@ export function renderBookingRequestedEmail(params: BookingEmailParams): Rendere
     ...nextSteps,
     "",
     `Cancellation policy: ${CANCELLATION_POLICY_TEXT}`,
+    ...cancelLinkText(params.cancelUrl, REQUEST_CANCEL_NOTE),
     "",
     questions,
   ].join("\n");
@@ -224,6 +246,7 @@ export function renderBookingConfirmationEmail(params: BookingEmailParams): Rend
     ${paragraphHtml(`Your booking for ${params.roomName} is confirmed, and the hold on your card has now been charged.`)}
     ${summaryTableHtml(summaryRows(params, { totalLabel: "Charged" }))}
     ${paragraphHtml(`Cancellation policy: ${CANCELLATION_POLICY_TEXT}`)}
+    ${cancelLinkHtml(params.cancelUrl, CONFIRMED_CANCEL_NOTE)}
     <h2 style="margin:20px 0 10px;font-family:${FONT_DISPLAY};font-weight:400;font-size:16px;color:${NAVY};">Arrival instructions</h2>
     ${listHtml(arrivalLines)}
   `;
@@ -233,6 +256,7 @@ export function renderBookingConfirmationEmail(params: BookingEmailParams): Rend
     ...summaryLinesText(params, { totalLabel: "Charged" }),
     "",
     `Cancellation policy: ${CANCELLATION_POLICY_TEXT}`,
+    ...cancelLinkText(params.cancelUrl, CONFIRMED_CANCEL_NOTE),
     "",
     "Arrival instructions:",
     ...arrivalLines.map((l) => `- ${l}`),
@@ -251,6 +275,7 @@ export function renderBookingReminderEmail(params: BookingEmailParams): Rendered
     ${summaryTableHtml(summaryRows(params))}
     <h2 style="margin:20px 0 10px;font-family:${FONT_DISPLAY};font-weight:400;font-size:16px;color:${NAVY};">Arrival instructions</h2>
     ${listHtml(arrivalLines)}
+    ${cancelLinkHtml(params.cancelUrl, REMINDER_CANCEL_NOTE)}
   `;
   const text = [
     `This is a reminder that your booking for ${params.roomName} starts within 24 hours.`,
@@ -259,6 +284,7 @@ export function renderBookingReminderEmail(params: BookingEmailParams): Rendered
     "",
     "Arrival instructions:",
     ...arrivalLines.map((l) => `- ${l}`),
+    ...cancelLinkText(params.cancelUrl, REMINDER_CANCEL_NOTE),
   ].join("\n");
   return { subject, html: emailLayout({ title: "Your booking is coming up", bodyHtml }), text };
 }
@@ -273,14 +299,25 @@ export function renderBookingDeclinedEmail(params: { roomName: string }): Render
   };
 }
 
-export function renderBookingCancelledEmail(params: { roomName: string; refundCents: number }): RenderedEmail {
+export function renderBookingCancelledEmail(params: {
+  roomName: string;
+  refundCents: number;
+  /** What happened to the payment; defaults from refundCents for older callers. */
+  action?: "release_hold" | "refund" | "no_refund";
+  startsAt?: string;
+  endsAt?: string;
+}): RenderedEmail {
   const subject = `Booking cancelled — ${params.roomName}`;
+  const action = params.action ?? (params.refundCents > 0 ? "refund" : "no_refund");
+  const when = params.startsAt ? ` on ${formatChicago(params.startsAt)}` : "";
   const message =
-    params.refundCents > 0
-      ? `Your booking for ${params.roomName} has been cancelled. A refund of ${formatMoney(
-          params.refundCents
-        )} is on its way back to your card.`
-      : `Your booking for ${params.roomName} has been cancelled. No refund is due per the cancellation policy.`;
+    action === "release_hold"
+      ? `Your booking request for ${params.roomName}${when} has been cancelled, and the hold on your card has been released. You were not charged.`
+      : action === "refund" && params.refundCents > 0
+        ? `Your booking for ${params.roomName}${when} has been cancelled. A full refund of ${formatMoney(
+            params.refundCents
+          )} is on its way back to your card (usually 5–10 business days).`
+        : `Your booking for ${params.roomName}${when} has been cancelled. No refund is due, because it was cancelled less than 48 hours before the start time.`;
   return {
     subject,
     html: emailLayout({ title: "Booking cancelled", bodyHtml: paragraphHtml(message) }),
@@ -323,4 +360,38 @@ export function renderHostNewRequestEmail(params: HostNewRequestParams): Rendere
     "Respond within 24 hours in the host queue, or it will auto-decline and release the hold.",
   ].join("\n");
   return { subject, html: emailLayout({ title: "New booking request", bodyHtml }), text };
+}
+
+export interface HostBookingCancelledParams extends BookingEmailParams {
+  guestName: string;
+  guestEmail: string;
+  refundCents: number;
+  action: "release_hold" | "refund" | "no_refund";
+  cancelledBy: "guest" | "staff";
+  courtesy?: boolean;
+}
+
+export function renderHostBookingCancelledEmail(params: HostBookingCancelledParams): RenderedEmail {
+  const who = params.cancelledBy === "guest" ? "the guest" : "staff";
+  const subject = `Booking cancelled by ${who} — ${params.roomName}`;
+  const outcome =
+    params.action === "release_hold"
+      ? "Card hold released (never charged)"
+      : params.action === "refund"
+        ? `Refunded ${formatMoney(params.refundCents)}${params.courtesy ? " (courtesy override)" : ""}`
+        : "No refund (inside 48h)";
+  const rows = [
+    { label: "Guest", value: params.guestName },
+    { label: "Email", value: params.guestEmail },
+    { label: "Room", value: params.roomName },
+    { label: "Starts", value: formatChicago(params.startsAt) },
+    { label: "Ends", value: formatChicago(params.endsAt) },
+    { label: "Booking total", value: formatMoney(params.totalCents) },
+    { label: "Payment", value: outcome, highlight: true },
+    { label: "Booking ID", value: params.bookingId },
+  ];
+  const intro = `A booking for ${params.roomName} was cancelled by ${who}. The calendar slot has been freed.`;
+  const bodyHtml = `${paragraphHtml(intro)}${summaryTableHtml(rows)}`;
+  const text = [intro, "", ...rows.map((r) => `${r.label}: ${r.value}`)].join("\n");
+  return { subject, html: emailLayout({ title: "Booking cancelled", bodyHtml }), text };
 }

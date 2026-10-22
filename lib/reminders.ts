@@ -1,5 +1,6 @@
 import { getBookingById } from "./bookings";
 import { getEmailSender } from "./email";
+import { cancelPageUrl } from "./booking-access";
 import { renderBookingReminderEmail } from "./email-templates";
 import { getSpaceById } from "./space-service";
 import { getStore, isDemoMode } from "./store";
@@ -54,6 +55,7 @@ export async function sendDueReminders(now: Date = new Date()): Promise<{ remind
       parkingPasses: booking.parkingPasses ?? 0,
       parkingCents: booking.parkingCents ?? 0,
       bookingId: booking.id,
+      cancelUrl: cancelPageUrl(booking.id),
     });
     await getEmailSender().send({
       to: booking.guestEmail || "guest@example.com",

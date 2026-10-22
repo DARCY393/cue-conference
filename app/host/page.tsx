@@ -32,8 +32,23 @@ const HOLD_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
   in_progress: { label: "Captured", tone: "success" },
 };
 
-function holdStatus(status: string): { label: string; tone: BadgeTone } {
-  return HOLD_STATUS[status] ?? { label: status, tone: "neutral" };
+function holdStatus(b: Pick<Booking, "status" | "cancellationAction" | "refundCents">): { label: string; tone: BadgeTone } {
+  if (b.status === "cancelled" && b.cancellationAction === "refund" && b.refundCents) {
+    return { label: `Refunded ${formatMoney(b.refundCents)}`, tone: "neutral" };
+  }
+  if (b.status === "cancelled" && b.cancellationAction === "no_refund") {
+    return { label: "Captured · no refund", tone: "neutral" };
+  }
+  return HOLD_STATUS[b.status] ?? { label: b.status, tone: "neutral" };
+}
+
+type CancelPreview = { cancellable: boolean; action?: "release_hold" | "refund" | "no_refund"; refundCents: number; summary: string };
+
+function previewLabel(p: CancelPreview | undefined): string {
+  if (!p) return "…";
+  if (p.action === "release_hold") return "Release hold — guest was never charged";
+  if (p.action === "refund") return `Full refund ${formatMoney(p.refundCents)}`;
+  return "No refund (inside 48h)";
 }
 
 export default function HostPage() {
@@ -129,6 +144,53 @@ export default function HostPage() {
     return () => clearInterval(t);
   }, []);
 
+  const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
+  const [cancelPreview, setCancelPreview] = useState<{ policy: CancelPreview; courtesy: CancelPreview } | null>(null);
+  const [courtesy, setCourtesy] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function openCancel(b: Booking) {
+    setCancelTarget(b);
+    setCancelPreview(null);
+    setCourtesy(false);
+    setCancelError(null);
+    const res = await fetch(`/api/v1/host/bookings/${b.id}/cancel`, { headers: headers() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setCancelError(data.message || "Couldn't load the refund preview");
+      return;
+    }
+    setCancelPreview({ policy: data.policy, courtesy: data.courtesy });
+  }
+
+  async function confirmCancel() {
+    if (!cancelTarget || cancelBusy) return;
+    setCancelBusy(true);
+    setCancelError(null);
+    const res = await fetch(`/api/v1/host/bookings/${cancelTarget.id}/cancel`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ courtesyFullRefund: courtesy }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setCancelBusy(false);
+    if (!res.ok) {
+      setCancelError(data.message || "Cancel failed");
+      return;
+    }
+    const outcome =
+      data.action === "release_hold"
+        ? "hold released"
+        : data.action === "refund"
+          ? `refunded ${formatMoney(data.refundCents)}`
+          : "no refund";
+    setNotice(`Booking ${cancelTarget.id} cancelled — ${outcome}. Guest and host have been emailed.`);
+    setCancelTarget(null);
+    await load();
+  }
+
   async function act(bookingId: string, action: "accept" | "decline") {
     setError(null);
     const res = await fetch(`/api/v1/host/bookings/${bookingId}/${action}`, {
@@ -207,6 +269,11 @@ export default function HostPage() {
       </div>
 
       {error && <Alert tone="danger">{error}</Alert>}
+      {notice && (
+        <Alert tone="success" title="Cancelled" onDismiss={() => setNotice(null)} data-testid="cancel-notice">
+          {notice}
+        </Alert>
+      )}
 
       {calendarWarning && (
         <Alert tone="warning" title="Calendar sync warning" onDismiss={() => setCalendarWarning(null)}>
@@ -239,7 +306,7 @@ export default function HostPage() {
           </p>
         )}
         {bookings.map((b) => {
-          const hold = holdStatus(b.status);
+          const hold = holdStatus(b);
           // A request whose start time has passed (CT) can't be accepted; only Decline is offered.
           const startPassed = b.status === "requested" && !isAcceptable(b, now);
           const code = b.spaceShortTitle || b.spaceSlug?.split("-").pop() || b.spaceTitle || "Room";
@@ -295,12 +362,88 @@ export default function HostPage() {
                       </Button>
                     </>
                   )}
+                  {(b.status === "requested" || b.status === "accepted") && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="text-cue-red-600!"
+                      data-testid={`cancel-${b.id}`}
+                      onClick={() => void openCancel(b)}
+                    >
+                      Cancel booking
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>
           );
         })}
       </section>
+
+      {cancelTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-cue-navy-900/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cancel-dialog-title"
+          data-testid="cancel-dialog"
+        >
+          <div className="cue-card w-full max-w-md space-y-4 bg-white p-6">
+            <div>
+              <p className="cue-eyebrow">Cancel booking</p>
+              <h2 id="cancel-dialog-title" className="mt-1 text-2xl">
+                Cancel {cancelTarget.spaceShortTitle || cancelTarget.spaceTitle || "booking"}?
+              </h2>
+              <p className="mt-1 text-sm text-cue-stone-700">
+                {formatChicago(cancelTarget.startsAt)} – {formatChicago(cancelTarget.endsAt)} CT ·{" "}
+                {cancelTarget.guestName || "Guest"} · {formatMoney(cancelTarget.totalCents)} ({cancelTarget.status})
+              </p>
+            </div>
+            <div className="rounded-tile border border-cue-copper-300 bg-cue-copper-050 p-4 text-sm" data-testid="cancel-dialog-refund">
+              <div className="text-cue-stone-500">Policy outcome</div>
+              <div className="mt-0.5 font-semibold text-cue-navy-600">{previewLabel(cancelPreview?.policy)}</div>
+              {courtesy && cancelPreview && (
+                <div className="mt-2 font-semibold text-cue-copper-600" data-testid="cancel-dialog-courtesy-amount">
+                  With courtesy override: {previewLabel(cancelPreview.courtesy)}
+                </div>
+              )}
+            </div>
+            {cancelTarget.status === "accepted" && (
+              <label className="flex items-start gap-2 text-sm text-cue-stone-700">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={courtesy}
+                  onChange={(e) => setCourtesy(e.target.checked)}
+                  data-testid="cancel-courtesy"
+                />
+                <span>
+                  <strong className="text-cue-navy-600">Full refund regardless</strong> (courtesy) — refund the full{" "}
+                  {formatMoney(cancelTarget.totalCents)} even if the 48h policy says otherwise.
+                </span>
+              </label>
+            )}
+            <p className="text-xs text-cue-stone-500">
+              The guest gets a cancellation email, the host is alerted, and the calendar slot is freed. This can&apos;t be undone.
+            </p>
+            {cancelError && <Alert tone="danger">{cancelError}</Alert>}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setCancelTarget(null)} disabled={cancelBusy}>
+                Keep booking
+              </Button>
+              <Button
+                type="button"
+                variant="accent"
+                onClick={() => void confirmCancel()}
+                disabled={cancelBusy || !cancelPreview}
+                data-testid="cancel-dialog-confirm"
+              >
+                {cancelBusy ? "Cancelling…" : "Yes, cancel booking"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="space-y-3">
         <h2 className="text-2xl">Blockouts</h2>

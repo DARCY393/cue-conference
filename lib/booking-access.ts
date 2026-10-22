@@ -32,3 +32,17 @@ export function verifyBookingAccessToken(bookingId: string, token: string | null
 export function requestedPagePath(bookingId: string): string {
   return `/bookings/${encodeURIComponent(bookingId)}/requested?t=${bookingAccessToken(bookingId)}`;
 }
+
+/** Guest self-cancel page; reuses the same per-booking token as the "Request received" page. */
+export function cancelPagePath(bookingId: string): string {
+  return `/bookings/${encodeURIComponent(bookingId)}/cancel?t=${bookingAccessToken(bookingId)}`;
+}
+
+function appBaseUrl(): string {
+  return (process.env.NEXT_PUBLIC_APP_URL || "https://book.thecue.work").trim().replace(/\/+$/, "");
+}
+
+/** Absolute, tokenized "Cancel booking" link for emails. */
+export function cancelPageUrl(bookingId: string): string {
+  return `${appBaseUrl()}${cancelPagePath(bookingId)}`;
+}

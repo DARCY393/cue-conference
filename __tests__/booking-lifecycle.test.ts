@@ -58,7 +58,10 @@ describe("cancelBooking — 48h free-cancellation policy", () => {
 
     expect(result.booking.status).toBe("cancelled");
     expect(result.refundCents).toBe(0);
-    expect(cancelSpy).toHaveBeenCalledWith(booking.stripePaymentIntentId);
+    expect(cancelSpy).toHaveBeenCalledWith(
+      booking.stripePaymentIntentId,
+      expect.objectContaining({ idempotencyKey: `booking-cancel-release:${booking.id}` })
+    );
     expect(refundSpy).not.toHaveBeenCalled();
   });
 

@@ -162,29 +162,56 @@ export async function capturePaymentIntent(paymentIntentId: string) {
   return client.paymentIntents.capture(paymentIntentId, {}, stripeRequestOptions());
 }
 
-export async function cancelPaymentIntent(paymentIntentId: string) {
+export async function cancelPaymentIntent(paymentIntentId: string, opts: { idempotencyKey?: string } = {}) {
   const client = getStripe();
   if (!client) return { id: paymentIntentId, status: "canceled" };
-  return client.paymentIntents.cancel(paymentIntentId, {}, stripeRequestOptions());
+  const reqOpts = stripeRequestOptions();
+  return client.paymentIntents.cancel(
+    paymentIntentId,
+    {},
+    opts.idempotencyKey ? { ...(reqOpts ?? {}), idempotencyKey: opts.idempotencyKey } : reqOpts
+  );
+}
+
+/**
+ * Amount already refunded on a PaymentIntent's charge (0 for mock ids / no Stripe). Used before a
+ * cancellation refund so a retry or a concurrent click never refunds twice.
+ */
+export async function getRefundedCents(paymentIntentId: string): Promise<number> {
+  const client = getStripe();
+  if (!client || paymentIntentId.includes("_mock_")) return 0;
+  const pi = await client.paymentIntents.retrieve(
+    paymentIntentId,
+    { expand: ["latest_charge"] },
+    stripeRequestOptions()
+  );
+  const charge = pi.latest_charge;
+  if (charge && typeof charge === "object") return Number(charge.amount_refunded ?? 0);
+  return 0;
 }
 
 export async function createRefund(opts: {
   paymentIntentId: string;
   amountCents: number;
+  /** Stripe idempotency key: the same key never creates a second refund. */
+  idempotencyKey?: string;
+  metadata?: Record<string, string>;
 }) {
   const client = getStripe();
   if (!client) {
     return { id: `re_mock_${Date.now()}`, amount: opts.amountCents };
   }
   const connect = getConnectConfig();
+  const reqOpts = stripeRequestOptions();
   return client.refunds.create(
     {
       payment_intent: opts.paymentIntentId,
       amount: opts.amountCents,
       // Direct charge: give back Honeycomb's fee pro rata with the refund.
       ...(connect ? { refund_application_fee: true } : {}),
+      ...(opts.metadata ? { metadata: opts.metadata } : {}),
     },
-    stripeRequestOptions()
+    opts.idempotencyKey ? { ...(reqOpts ?? {}), idempotencyKey: opts.idempotencyKey } : reqOpts
   );
 }
 

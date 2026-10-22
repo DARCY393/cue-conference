@@ -16,15 +16,18 @@ import {
   capturePaymentIntent,
   cancelPaymentIntent,
   createRefund,
+  getRefundedCents,
   createOvertimePaymentIntent,
   retrievePaymentIntent,
 } from "./stripe";
 import { getEmailSender } from "./email";
+import { cancelPageUrl } from "./booking-access";
 import {
   renderBookingRequestedEmail,
   renderHostNewRequestEmail,
   renderBookingDeclinedEmail,
   renderBookingCancelledEmail,
+  renderHostBookingCancelledEmail,
   renderBookingExpiredEmail,
   renderBookingConfirmationEmail,
   type BookingEmailParams,
@@ -64,6 +67,7 @@ function bookingEmailParams(booking: Booking, space: SpacePublic | null | undefi
     subtotalCents: booking.subtotalCents,
     discountCents: booking.discountCents,
     discountLabel: booking.quoteJson?.lineItems?.find((l) => l.code === "discount_long_booking")?.label,
+    cancelUrl: cancelPageUrl(booking.id),
   };
 }
 
@@ -114,6 +118,7 @@ export function sanitizeBookingForApi(b: Booking): Booking {
   delete copy.googleEventId;
   delete copy.reminderSentAt;
   delete copy.clientRequestKey;
+  delete copy.cancelClaimedAt;
   return copy;
 }
 
@@ -124,6 +129,7 @@ export function sanitizeBookingForPublic(b: Booking): Booking {
   delete copy.guestName;
   delete copy.guestNotes;
   delete copy.activityDescription;
+  delete copy.stripeRefundId;
   return copy;
 }
 
@@ -709,6 +715,11 @@ export async function getBookingById(id: string): Promise<Booking | null> {
       : undefined,
     stripePaymentIntentId: (r.stripe_payment_intent_id as string) ?? undefined,
     googleEventId: (r.google_event_id as string) ?? undefined,
+    cancelClaimedAt: r.cancel_claimed_at ? new Date(r.cancel_claimed_at as string).toISOString() : undefined,
+    refundCents: r.refund_cents == null ? undefined : Number(r.refund_cents),
+    stripeRefundId: (r.stripe_refund_id as string) ?? undefined,
+    cancellationAction: (r.cancellation_action as Booking["cancellationAction"]) ?? undefined,
+    cancelledBy: (r.cancelled_by as Booking["cancelledBy"]) ?? undefined,
     createdAt: new Date(r.created_at as string).toISOString(),
     guestEmail: (r.guest_email as string) ?? undefined,
     guestName: (r.guest_name as string) ?? undefined,
@@ -718,74 +729,237 @@ export async function getBookingById(id: string): Promise<Booking | null> {
   return toBookingPublic(booking, space);
 }
 
+/** A cancel claim older than this is treated as abandoned (e.g. the process died mid-cancel). */
+const CANCEL_CLAIM_STALE_MS = 10 * 60 * 1000;
+
+export type CancelActor = "guest" | "staff";
+
+export interface CancelBookingOptions {
+  actor?: CancelActor;
+  reason?: string;
+  /** Staff-only courtesy override: refund the full captured amount regardless of the 48h policy. */
+  courtesyFullRefund?: boolean;
+}
+
+export type CancelBookingResult =
+  | {
+      booking: Booking;
+      refundCents: number;
+      refundId?: string;
+      action: import("./refund").CancellationAction;
+      alreadyCancelled?: boolean;
+    }
+  | { error: string; message: string; status: number };
+
+/** Atomically claim the booking for cancellation. Only one concurrent caller gets `true`. */
+async function claimCancellation(id: string): Promise<boolean> {
+  const now = new Date();
+  if (isDemoMode()) {
+    const b = getStore().getBooking(id);
+    if (!b || !["requested", "accepted"].includes(b.status)) return false;
+    if (b.cancelClaimedAt && now.getTime() - new Date(b.cancelClaimedAt).getTime() < CANCEL_CLAIM_STALE_MS) {
+      return false;
+    }
+    getStore().updateBooking(id, { cancelClaimedAt: now.toISOString() });
+    return true;
+  }
+  const { rowCount } = await query(
+    `UPDATE bookings SET cancel_claimed_at = $2
+     WHERE id = $1 AND status IN ('requested','accepted')
+       AND (cancel_claimed_at IS NULL OR cancel_claimed_at < $3)`,
+    [id, now.toISOString(), new Date(now.getTime() - CANCEL_CLAIM_STALE_MS).toISOString()]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+async function releaseCancellationClaim(id: string): Promise<void> {
+  if (isDemoMode()) {
+    getStore().updateBooking(id, { cancelClaimedAt: undefined });
+    return;
+  }
+  await query(`UPDATE bookings SET cancel_claimed_at = NULL WHERE id = $1 AND status <> 'cancelled'`, [id]);
+}
+
+/**
+ * Cancel a requested or accepted booking (guest self-cancel or staff). Idempotent:
+ * - the first caller atomically claims the booking before any Stripe call; a concurrent second
+ *   caller gets 409 cancel_in_progress, and a later one gets the already-cancelled booking back;
+ * - refunds carry a per-booking Stripe idempotency key and are skipped if the charge already
+ *   shows that much refunded, so a retry after a crash never refunds twice.
+ * Stripe webhooks (charge.refunded / payment_intent.canceled) only record payment_events, so they
+ * can't trigger a second refund either.
+ */
 export async function cancelBooking(
   id: string,
-  reason?: string
-): Promise<
-  | { booking: Booking; refundCents: number; refundId?: string }
-  | { error: string; message: string; status: number }
-> {
-  void reason;
+  optsOrReason?: CancelBookingOptions | string
+): Promise<CancelBookingResult> {
+  const opts: CancelBookingOptions =
+    typeof optsOrReason === "string" ? { reason: optsOrReason } : optsOrReason ?? {};
+  const actor: CancelActor = opts.actor ?? "staff";
   const booking = await getBookingById(id);
   if (!booking) return { error: "not_found", message: "Booking not found", status: 404 };
+  if (booking.status === "cancelled") {
+    return {
+      booking,
+      refundCents: booking.refundCents ?? 0,
+      refundId: booking.stripeRefundId,
+      action: booking.cancellationAction ?? "release_hold",
+      alreadyCancelled: true,
+    };
+  }
   if (!["requested", "accepted"].includes(booking.status)) {
     return {
       error: "invalid_status",
-      message: "Only requested or accepted bookings can be cancelled via this endpoint",
+      message: "Only requested or accepted bookings can be cancelled",
       status: 409,
     };
   }
+  if (actor === "guest" && new Date(booking.startsAt).getTime() <= Date.now()) {
+    return {
+      error: "start_passed",
+      message: "This booking has already started, so it can't be cancelled online. Please contact us.",
+      status: 409,
+    };
+  }
+
+  if (!(await claimCancellation(id))) {
+    const current = await getBookingById(id);
+    if (current?.status === "cancelled") {
+      return {
+        booking: current,
+        refundCents: current.refundCents ?? 0,
+        refundId: current.stripeRefundId,
+        action: current.cancellationAction ?? "release_hold",
+        alreadyCancelled: true,
+      };
+    }
+    return {
+      error: "cancel_in_progress",
+      message: "This booking is already being cancelled. Refresh in a moment.",
+      status: 409,
+    };
+  }
+
   const space = await getSpaceById(booking.spaceId);
   const rules = space?.cancellationPolicy?.rules ?? CANCELLATION_DEFAULT;
-  // "accepted" means staff captured the PaymentIntent (see acceptBooking) —
-  // anything still "requested" was never charged, only authorized.
-  const captured = booking.status === "accepted";
-  const result = calculateCancellationRefund({
-    now: new Date(),
-    startsAt: new Date(booking.startsAt),
-    totalCents: booking.totalCents,
-    captured,
-    rules,
-  });
+  const piId = booking.stripePaymentIntentId;
 
+  let action: import("./refund").CancellationAction;
+  let refundCents = 0;
   let refundId: string | undefined;
-  if (booking.stripePaymentIntentId) {
-    if (result.action === "release_hold") {
-      await cancelPaymentIntent(booking.stripePaymentIntentId);
-    } else if (result.action === "refund") {
-      const refund = await createRefund({
-        paymentIntentId: booking.stripePaymentIntentId,
-        amountCents: result.refundCents,
-      });
-      refundId = refund.id;
+  try {
+    // Decide "captured" from Stripe itself when we can (a staff accept may have captured the hold
+    // a moment ago); mock/no-Stripe falls back to the booking status.
+    let piStatus: string | undefined;
+    if (piId) {
+      const pi = await retrievePaymentIntent(piId);
+      piStatus = pi.mock ? (booking.status === "accepted" ? "succeeded" : "requires_capture") : pi.status;
     }
+    const captured = piId ? piStatus === "succeeded" : booking.status === "accepted";
+    let result = calculateCancellationRefund({
+      now: new Date(),
+      startsAt: new Date(booking.startsAt),
+      totalCents: booking.totalCents,
+      captured,
+      rules,
+    });
+    if (captured && (booking.status === "requested" || (actor === "staff" && opts.courtesyFullRefund))) {
+      // requested + captured = staff accepted concurrently with this cancel: the guest cancelled
+      // before being charged, so they get everything back.
+      result = {
+        refundCents: booking.totalCents,
+        action: "refund",
+        reason: booking.status === "requested" ? "Cancelled while being accepted." : "Courtesy full refund (staff).",
+      };
+    }
+    action = result.action;
+    refundCents = result.refundCents;
+
+    if (piId) {
+      if (action === "release_hold") {
+        if (piStatus !== "canceled") {
+          await cancelPaymentIntent(piId, { idempotencyKey: `booking-cancel-release:${id}` });
+        }
+      } else if (action === "refund" && refundCents > 0) {
+        const already = await getRefundedCents(piId);
+        const remaining = refundCents - already;
+        if (remaining > 0) {
+          const refund = await createRefund({
+            paymentIntentId: piId,
+            amountCents: remaining,
+            idempotencyKey: `booking-cancel-refund:${id}`,
+            metadata: { booking_id: id, cancelled_by: actor },
+          });
+          refundId = refund.id;
+        }
+      }
+    }
+  } catch (err) {
+    await releaseCancellationClaim(id);
+    console.error(`[cancel] ${id}: Stripe step failed`, err instanceof Error ? err.message : err);
+    return {
+      error: "payment_error",
+      message: "We couldn't process the cancellation with our payment provider. Nothing was changed — please try again or contact us.",
+      status: 502,
+    };
   }
 
   const cancelledAt = new Date().toISOString();
   if (isDemoMode()) {
-    getStore().updateBooking(id, { status: "cancelled", cancelledAt });
+    getStore().updateBooking(id, {
+      status: "cancelled",
+      cancelledAt,
+      refundCents,
+      stripeRefundId: refundId,
+      cancellationAction: action,
+      cancelledBy: actor,
+    });
   } else {
     await query(
-      `UPDATE bookings SET status = 'cancelled', cancelled_at = $2 WHERE id = $1`,
-      [id, cancelledAt]
+      `UPDATE bookings
+       SET status = 'cancelled', cancelled_at = $2, refund_cents = $3, stripe_refund_id = $4,
+           cancellation_action = $5, cancelled_by = $6
+       WHERE id = $1 AND status IN ('requested','accepted')`,
+      [id, cancelledAt, refundCents, refundId ?? null, action, actor]
     );
   }
-  if (booking.googleEventId) {
-    await deleteGoogleBookingEvent(space, booking.googleEventId);
+  // Free the slot on the calendar; availability already ignores cancelled bookings.
+  const latest = await getBookingById(id);
+  const eventId = latest?.googleEventId ?? booking.googleEventId;
+  if (eventId) {
+    await deleteGoogleBookingEvent(space, eventId);
   }
-  const updated = (await getBookingById(id))!;
-  const cancelled = renderBookingCancelledEmail({
-    roomName: roomNameFor(space, booking),
-    refundCents: result.refundCents,
-  });
-  await getEmailSender().send({
-    to: booking.guestEmail || "guest@example.com",
-    template: "booking_cancelled",
-    subject: cancelled.subject,
-    html: cancelled.html,
-    text: cancelled.text,
-  });
-  return { booking: updated, refundCents: result.refundCents, refundId };
+  const updated = latest ?? booking;
+  const roomName = roomNameFor(space, booking);
+  try {
+    const cancelled = renderBookingCancelledEmail({ roomName, refundCents, action, startsAt: booking.startsAt, endsAt: booking.endsAt });
+    await getEmailSender().send({
+      to: booking.guestEmail || "guest@example.com",
+      template: "booking_cancelled",
+      subject: cancelled.subject,
+      html: cancelled.html,
+      text: cancelled.text,
+    });
+    const host = renderHostBookingCancelledEmail({
+      ...bookingEmailParams(booking, space),
+      guestName: booking.guestName || "Guest",
+      guestEmail: booking.guestEmail || "",
+      refundCents,
+      action,
+      cancelledBy: actor,
+      courtesy: Boolean(opts.courtesyFullRefund && actor === "staff" && action === "refund"),
+    });
+    await getEmailSender().send({
+      to: process.env.HOST_EMAIL || "host@example.com",
+      template: "host_booking_cancelled",
+      subject: host.subject,
+      html: host.html,
+      text: host.text,
+    });
+  } catch (err) {
+    console.error(`[cancel] ${id}: email failed`, err instanceof Error ? err.message : err);
+  }
+  return { booking: updated, refundCents, refundId, action };
 }
 
 /**
@@ -934,6 +1108,9 @@ export async function acceptBooking(id: string) {
       status: 409,
     };
   }
+  if (booking.cancelClaimedAt) {
+    return { error: "cancel_in_progress" as const, message: "This booking is being cancelled", status: 409 };
+  }
   if (booking.stripePaymentIntentId) {
     await capturePaymentIntent(booking.stripePaymentIntentId);
   }
@@ -954,13 +1131,27 @@ export async function acceptBooking(id: string) {
       console.error(`[google-calendar] accept(${id}): ${calendarSyncWarning}`);
     }
   }
+  let acceptedRow = true;
   if (isDemoMode()) {
-    getStore().updateBooking(id, { status: "accepted", decidedAt, googleEventId });
+    const cur = getStore().getBooking(id);
+    if (cur && cur.status === "requested" && !cur.cancelClaimedAt) {
+      getStore().updateBooking(id, { status: "accepted", decidedAt, googleEventId });
+    } else {
+      acceptedRow = false;
+    }
   } else {
-    await query(
-      `UPDATE bookings SET status = 'accepted', decided_at = $2, google_event_id = $3 WHERE id = $1`,
+    const res = await query(
+      `UPDATE bookings SET status = 'accepted', decided_at = $2, google_event_id = $3
+       WHERE id = $1 AND status = 'requested' AND cancel_claimed_at IS NULL`,
       [id, decidedAt, googleEventId ?? null]
     );
+    acceptedRow = (res.rowCount ?? 0) > 0;
+  }
+  if (!acceptedRow) {
+    // The guest cancelled while we were capturing; cancelBooking sees the captured PaymentIntent
+    // and refunds it in full. Drop the calendar event we just created.
+    if (googleEventId) await deleteGoogleBookingEvent(space, googleEventId);
+    return { error: "cancel_in_progress" as const, message: "The guest cancelled this booking while it was being accepted", status: 409 };
   }
   const updated = (await getBookingById(id))!;
   const confirmation = renderBookingConfirmationEmail(bookingEmailParams(updated, space));

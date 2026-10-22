@@ -156,6 +156,13 @@ export interface Booking {
   stripePaymentIntentId?: string;
   googleEventId?: string;
   reminderSentAt?: string;
+  /** Set atomically by the first cancel request (internal idempotency claim). */
+  cancelClaimedAt?: string;
+  /** What the cancellation refunded, in cents (0 for a released hold or no-refund). */
+  refundCents?: number;
+  stripeRefundId?: string;
+  cancellationAction?: "release_hold" | "refund" | "no_refund";
+  cancelledBy?: "guest" | "staff";
   /** Per-form idempotency key from the guest's browser (internal; stripped from API responses). */
   clientRequestKey?: string;
   accessDetails?: string;
