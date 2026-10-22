@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { calculateQuote, calculateOvertimeCents, computeAddonCents } from "./quote";
 import { calculateCancellationRefund, CANCELLATION_DEFAULT } from "./refund";
 import { expandDayWindows, isAvailable, totalWindowHours } from "./availability";
+import { isStartInPast, localDateString, START_IN_PAST_MESSAGE } from "./booking-window";
 import { getBusy, getSpaceById } from "./space-service";
 import { getStore, isDemoMode } from "./store";
 import { query } from "./db";
@@ -148,7 +149,17 @@ export async function createQuoteForSpace(
   if (!space) {
     return { ok: false, error: "not_found", message: "Space not found", status: 404 };
   }
-  const windows = expandDayWindows(startsAt, endsAt, endDate ?? null, space.timezone, space.bookableHours);
+  // A span whose end falls on a later local day than its start is a multi-day
+  // reservation even when the caller omitted endDate: treat endsAt's day as the
+  // last day (as authorize/accept already do), so every day in the span is
+  // priced and checked for conflicts — not just the first one.
+  const effectiveEndDate =
+    endDate ??
+    (localDateString(endsAt, space.timezone) > localDateString(startsAt, space.timezone) ? endsAt : null);
+  const windows = expandDayWindows(startsAt, endsAt, effectiveEndDate, space.timezone, space.bookableHours);
+  if (windows.length > 0 && isStartInPast(windows[0].startsAt)) {
+    return { ok: false, error: "start_in_past", message: START_IN_PAST_MESSAGE, status: 409 };
+  }
   if (windows.length === 0) {
     return {
       ok: false,
@@ -537,12 +548,24 @@ export async function authorizeBooking(id: string): Promise<AuthorizeResult> {
   const windows = space
     ? expandDayWindows(startsAt, endsAt, endsAt, space.timezone, space.bookableHours)
     : [{ startsAt, endsAt }];
+  const slotTaken = () => discardDraftBooking(id, "cancelled");
+  // The draft may have sat open past its start time (e.g. a tab left open): never promote it.
+  if (isStartInPast(windows.length > 0 ? windows[0].startsAt : startsAt)) {
+    await slotTaken();
+    return {
+      error: "start_in_past",
+      message: `${START_IN_PAST_MESSAGE} Your card hold has been released.`,
+      status: 409,
+    };
+  }
   let busy = await getBusy(booking.spaceId, startsAt, endsAt);
   if (space) {
+    // Fail closed: if the room calendar can't be read we can't prove the slot is free.
+    // Keep the draft (the guest can retry) rather than promoting it blind.
     const g = await getGoogleBusy(space, startsAt, endsAt);
-    if (g.ok) busy = [...busy, ...g.busy];
+    if (!g.ok) return { error: g.error, message: g.message, status: 409 };
+    busy = [...busy, ...g.busy];
   }
-  const slotTaken = () => discardDraftBooking(id, "cancelled");
   if (!windows.every((w) => isAvailable(w.startsAt, w.endsAt, busy))) {
     await slotTaken();
     return {

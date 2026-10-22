@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/Button";
 import { capacityLabel, formatMoney, formatRate, roomCode } from "@/lib/format";
 import { isValidEmail } from "@/lib/validate";
 import { MAX_GALLERY_PHOTOS } from "@/lib/space-public";
+import { firstBookableDate, futureStartTimes, localDateString, wallClockToUtc } from "@/lib/booking-window";
 
 const PARKING_MAPS_URL =
   "https://www.google.com/maps/search/?api=1&query=720+N+Ervay+St+Dallas+TX+75201";
@@ -36,28 +37,6 @@ const money = formatMoney;
 /** Breaks a section out of the centered page container to span the full viewport width. */
 function FullBleed({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <div className={`relative left-1/2 w-screen -translate-x-1/2 ${className}`}>{children}</div>;
-}
-
-/** Next weekday (Mon–Fri) on or after today, read in America/Chicago, as a yyyy-mm-dd date-input value. */
-function nextWeekdayChicago(): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    weekday: "short",
-  }).formatToParts(new Date());
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  let date = new Date(Date.UTC(Number(get("year")), Number(get("month")) - 1, Number(get("day"))));
-  let weekday = get("weekday");
-  while (weekday === "Sat" || weekday === "Sun") {
-    date = new Date(date.getTime() + 24 * 60 * 60 * 1000);
-    weekday = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short" }).format(date);
-  }
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(date.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
 }
 
 /** One idempotency key per checkout attempt, so a double click or retry can't create two bookings. */
@@ -213,6 +192,9 @@ const TIME_OPTIONS: string[] = Array.from({ length: 21 }, (_, i) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 });
 
+/** Start times that fit the 1-hour minimum before 18:00; used to pick the first bookable date. */
+const DEFAULT_START_OPTIONS: string[] = TIME_OPTIONS.filter((t) => t <= "17:00");
+
 function addMinutesToTime(hhmm: string, minutesToAdd: number): string {
   const [h, m] = hhmm.split(":").map(Number);
   const total = Math.min((h || 0) * 60 + (m || 0) + minutesToAdd, 24 * 60);
@@ -296,8 +278,10 @@ export default function SpacePage() {
   const slug = typeof params.slug === "string" ? params.slug : "";
   const [space, setSpace] = useState<SpacePublic | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [date, setDate] = useState(() => nextWeekdayChicago());
-  const [endDate, setEndDate] = useState(() => nextWeekdayChicago());
+  /** "Now", refreshed every minute so today's already-passed start times drop out of the picker. */
+  const [now, setNow] = useState(() => new Date());
+  const [date, setDate] = useState(() => firstBookableDate(DEFAULT_START_OPTIONS));
+  const [endDate, setEndDate] = useState(() => firstBookableDate(DEFAULT_START_OPTIONS));
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("11:00");
   const [parkingPasses, setParkingPasses] = useState(0);
@@ -354,14 +338,37 @@ export default function SpacePage() {
     [startTime, minHours]
   );
 
-  /** Latest start that still fits the minimum booking before 18:00. */
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const todayCT = localDateString(now);
+
+  /**
+   * Latest start that still fits the minimum booking before 18:00, and — when the
+   * date is today (America/Chicago) — only start times that haven't passed yet.
+   */
   const startTimeOptions = useMemo(() => {
     const latest = 18 * 60 - minHours * 60;
-    return TIME_OPTIONS.filter((t) => {
+    const inHours = TIME_OPTIONS.filter((t) => {
       const [h, m] = t.split(":").map(Number);
       return h * 60 + m <= latest;
     });
-  }, [minHours]);
+    return futureStartTimes(inHours, date, now);
+  }, [minHours, date, now]);
+
+  // A start date before today (CT) can't be booked: snap it forward.
+  useEffect(() => {
+    if (date < todayCT) setDate(firstBookableDate(DEFAULT_START_OPTIONS, now));
+  }, [date, todayCT, now]);
+
+  // Keep the selected start time among the still-bookable options.
+  useEffect(() => {
+    if (startTimeOptions.length && !startTimeOptions.includes(startTime)) {
+      setStartTime(startTimeOptions[0]);
+    }
+  }, [startTimeOptions, startTime]);
 
   const endTimeOptions = useMemo(
     () => TIME_OPTIONS.filter((t) => t >= minEndTime),
@@ -382,9 +389,10 @@ export default function SpacePage() {
     // For MVP UI we send as America/Chicago wall clock with -06:00/-05:00 naive: use Date constructed and toISOString.
     const start = normalizeTime(startTime);
     const end = normalizeTime(endTime);
-    const startsAt = new Date(`${date}T${start}:00`);
-    const endsAt = new Date(`${date}T${end}:00`);
-    const endDateInstant = isMultiDay ? new Date(`${endDate}T${end}:00`) : null;
+    // Wall-clock times are always the room's timezone (America/Chicago), not the browser's.
+    const startsAt = wallClockToUtc(date, start, space.timezone || "America/Chicago");
+    const endsAt = wallClockToUtc(date, end, space.timezone || "America/Chicago");
+    const endDateInstant = isMultiDay ? wallClockToUtc(endDate, end, space.timezone || "America/Chicago") : null;
     return {
       startsAt: startsAt.toISOString(),
       endsAt: endsAt.toISOString(),
@@ -624,6 +632,7 @@ export default function SpacePage() {
               <input
                 type="date"
                 value={date}
+                min={todayCT}
                 disabled={fieldsLocked}
                 onChange={(e) => setDate(e.target.value)}
                 className="cue-input"
@@ -660,6 +669,11 @@ export default function SpacePage() {
                   </option>
                 ))}
               </select>
+              {startTimeOptions.length === 0 && (
+                <span className="mt-1 block text-xs text-cue-stone-500">
+                  No start times left on this date. Please pick a later date.
+                </span>
+              )}
             </label>
             <label className="block text-sm">
               <span className="text-cue-stone-500">End</span>

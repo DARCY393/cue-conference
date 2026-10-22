@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["__tests__/**/*.test.ts"],
+    setupFiles: ["__tests__/setup-clock.ts"],
     env: {
       GOOGLE_CALENDAR_MODE: "mock",
       // These tests exercise the in-memory demo store directly (resetStore(), getStore()).

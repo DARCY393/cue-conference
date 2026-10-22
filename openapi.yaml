@@ -106,6 +106,10 @@ paths:
                   value:
                     error: outside_bookable_hours
                     message: Requested time is outside Mon–Fri 8:00am–6:00pm CT.
+                start_in_past:
+                  value:
+                    error: start_in_past
+                    message: That start time has already passed. Please pick a later time.
 
   /bookings:
     post:
@@ -629,7 +633,7 @@ components:
       properties:
         error:
           type: string
-          examples: [slot_unavailable, outside_bookable_hours, invalid_status]
+          examples: [slot_unavailable, outside_bookable_hours, start_in_past, calendar_unavailable, invalid_status]
         message:
           type: string
         details:

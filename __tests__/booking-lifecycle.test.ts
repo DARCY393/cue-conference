@@ -22,7 +22,8 @@ function windowIso(hours: number, offsetHours = 0) {
   return { startsAt: start.toISOString(), endsAt: end.toISOString() };
 }
 
-async function requestBooking(spaceId: string, email: string, offsetHours = 0) {
+async function requestBooking(spaceId: string, email: string, offsetHours = 1) {
+  // Default 1h after the frozen "now": a booking may not start in the past (or right now).
   const { startsAt, endsAt } = windowIso(1, offsetHours);
   const result = await createBookingRequest({
     spaceId,
