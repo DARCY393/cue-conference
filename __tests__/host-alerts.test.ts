@@ -71,6 +71,7 @@ describe("host alert formatting", () => {
     expect(shortDateRange("2026-10-30T14:00:00.000Z", "2026-11-02T22:00:00.000Z")).toBe("Oct 30–Nov 2");
     expect(shortDeadline(ALLISON.hostActionDeadlineAt)).toBe("Tue 3:54 PM");
     expect(companyFromEmail("a@gmail.com")).toBeUndefined();
+    expect(companyFromEmail("darcy@thecue.work")).toBeUndefined();
     expect(companyFromEmail("a@yahoo.com")).toBeUndefined();
     expect(companyFromEmail("a@mail.acme.co.uk")).toBe("Acme");
   });

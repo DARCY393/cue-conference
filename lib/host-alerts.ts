@@ -4,6 +4,8 @@ const TZ = "America/Chicago";
 const FREEMAIL = new Set([
   "gmail", "googlemail", "yahoo", "ymail", "hotmail", "outlook", "live", "msn", "aol", "icloud",
   "me", "mac", "proton", "protonmail", "gmx", "mail", "comcast", "att", "sbcglobal", "verizon", "example",
+  // Our own domain: staff test bookings should not read as a company.
+  "thecue",
 ]);
 
 /** "Integrity" from allison@integrity.com; undefined for personal mailboxes. */
