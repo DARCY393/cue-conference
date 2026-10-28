@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { expireOverdueRequests } from "../lib/bookings";
 import { sendDueReminders } from "../lib/reminders";
+import { sendHostDecisionReminders } from "../lib/host-reminders";
 
 async function main() {
   const result = await expireOverdueRequests();
@@ -15,6 +16,15 @@ async function main() {
   if (result.expiredDraftIds.length > 0) {
     console.log(
       `Discarded ${result.expiredDraftIds.length} abandoned checkout draft(s): ${result.expiredDraftIds.join(", ")}`
+    );
+  }
+
+  const hostReminders = await sendHostDecisionReminders();
+  if (hostReminders.reminded.length === 0) {
+    console.log("No host decision reminders due.");
+  } else {
+    console.log(
+      `Sent ${hostReminders.reminded.length} host decision reminder(s): ${hostReminders.reminded.map((r) => `${r.id} (${r.slot})`).join(", ")}`
     );
   }
 

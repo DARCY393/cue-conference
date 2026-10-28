@@ -130,3 +130,4 @@ Idempotent.
 America/Chicago (was 7:00). Existing bookings are not changed.
 `019_rename_m2_conference_room.sql` renames M2 to "M2 Conference Room" (short title stays "M2").
 Both idempotent.
+`020_booking_cancellation_tracking.sql` adds cancellation outcome columns; `021_host_decision_reminders.sql` adds `host_reminder_6h_sent_at` / `host_reminder_2h_sent_at` (host 6h/2h decision reminders). Both idempotent.

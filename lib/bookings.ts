@@ -21,6 +21,8 @@ import {
   retrievePaymentIntent,
 } from "./stripe";
 import { getEmailSender } from "./email";
+import { sendHostSms } from "./sms";
+import { cancelledSms, newRequestSms } from "./host-alerts";
 import { cancelPageUrl } from "./booking-access";
 import {
   renderBookingRequestedEmail,
@@ -85,6 +87,7 @@ async function sendBookingRequestedEmails(booking: Booking, space: SpacePublic |
     ...params,
     guestName: booking.guestName || "Guest",
     guestEmail: booking.guestEmail || "",
+    hostActionDeadlineAt: booking.hostActionDeadlineAt,
   });
   await getEmailSender().send({
     to: process.env.HOST_EMAIL || "host@example.com",
@@ -93,6 +96,18 @@ async function sendBookingRequestedEmails(booking: Booking, space: SpacePublic |
     html: host.html,
     text: host.text,
   });
+  await sendHostSms(
+    newRequestSms({
+      roomName: params.roomName,
+      startsAt: booking.startsAt,
+      endsAt: booking.endsAt,
+      totalCents: booking.totalCents,
+      guestName: booking.guestName,
+      guestEmail: booking.guestEmail,
+      hostActionDeadlineAt: booking.hostActionDeadlineAt,
+    }),
+    `new_request ${booking.id}`
+  );
 }
 
 function toBookingPublic(b: Booking, space?: SpacePublic | null): Booking {
@@ -117,6 +132,8 @@ export function sanitizeBookingForApi(b: Booking): Booking {
   const copy = { ...b };
   delete copy.googleEventId;
   delete copy.reminderSentAt;
+  delete copy.hostReminder6hSentAt;
+  delete copy.hostReminder2hSentAt;
   delete copy.clientRequestKey;
   delete copy.cancelClaimedAt;
   return copy;
@@ -715,6 +732,8 @@ export async function getBookingById(id: string): Promise<Booking | null> {
       : undefined,
     stripePaymentIntentId: (r.stripe_payment_intent_id as string) ?? undefined,
     googleEventId: (r.google_event_id as string) ?? undefined,
+    hostReminder6hSentAt: r.host_reminder_6h_sent_at ? new Date(r.host_reminder_6h_sent_at as string).toISOString() : undefined,
+    hostReminder2hSentAt: r.host_reminder_2h_sent_at ? new Date(r.host_reminder_2h_sent_at as string).toISOString() : undefined,
     cancelClaimedAt: r.cancel_claimed_at ? new Date(r.cancel_claimed_at as string).toISOString() : undefined,
     refundCents: r.refund_cents == null ? undefined : Number(r.refund_cents),
     stripeRefundId: (r.stripe_refund_id as string) ?? undefined,
@@ -956,6 +975,20 @@ export async function cancelBooking(
       html: host.html,
       text: host.text,
     });
+    await sendHostSms(
+      cancelledSms({
+        roomName,
+        startsAt: booking.startsAt,
+        endsAt: booking.endsAt,
+        totalCents: booking.totalCents,
+        guestName: booking.guestName,
+        guestEmail: booking.guestEmail,
+        action,
+        refundCents,
+        cancelledBy: actor,
+      }),
+      `cancelled ${id}`
+    );
   } catch (err) {
     console.error(`[cancel] ${id}: email failed`, err instanceof Error ? err.message : err);
   }

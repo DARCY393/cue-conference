@@ -289,7 +289,7 @@ describe("side effects + email links", () => {
     expect(guest.text).toContain(`$${(b.totalCents / 100).toFixed(2)}`);
     const host = sent.find((m) => m.template === "host_booking_cancelled")!;
     expect(host.to).toBe("spp@thecue.work");
-    expect(host.subject).toContain("cancelled by the guest");
+    expect(host.subject).toMatch(/^Cancelled: M2 .* — Grace Hopper — refund .* \(by guest\)$/);
     expect(host.text).toContain("Refunded");
   });
 

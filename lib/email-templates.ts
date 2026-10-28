@@ -1,3 +1,4 @@
+import { cancelledSubject, hostQueueUrl, newRequestSubject, reminderSubject } from "./host-alerts";
 import { arrivalInstructionLines } from "./arrival-instructions";
 import { formatMoney } from "./format";
 import {
@@ -338,28 +339,60 @@ export function renderBookingExpiredEmail(params: { roomName: string }): Rendere
 export interface HostNewRequestParams extends BookingEmailParams {
   guestName: string;
   guestEmail: string;
+  /** Auto-decline deadline; shown prominently at the top of the email. */
+  hostActionDeadlineAt?: string;
+}
+
+function deadlineBannerHtml(text: string, url: string): string {
+  return `<div style="margin:0 0 18px;padding:14px 16px;border:2px solid ${COPPER};border-radius:10px;background:#fff7ef;">
+      <p style="margin:0 0 6px;font-size:16px;line-height:1.4;font-weight:700;color:${COPPER};">${escapeHtml(text)}</p>
+      <a href="${escapeHtml(url)}" style="display:inline-block;padding:9px 16px;border-radius:8px;background:${NAVY};color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;">Open host queue</a>
+    </div>`;
+}
+
+function deadlineLine(deadlineIso: string | undefined): string {
+  return deadlineIso
+    ? `ACTION NEEDED: accept or decline by ${formatChicago(deadlineIso)} (Central) or it auto-declines and the hold is released.`
+    : "ACTION NEEDED: accept or decline within 24 hours or it auto-declines and the hold is released.";
 }
 
 export function renderHostNewRequestEmail(params: HostNewRequestParams): RenderedEmail {
-  const subject = `New booking request — ${params.roomName}`;
+  const subject = newRequestSubject({ ...params });
+  const queueUrl = hostQueueUrl();
+  const banner = deadlineLine(params.hostActionDeadlineAt);
   const rows = [
     { label: "Guest", value: params.guestName },
     { label: "Email", value: params.guestEmail },
     ...summaryRows(params),
   ];
   const bodyHtml = `
+    ${deadlineBannerHtml(banner, queueUrl)}
     ${paragraphHtml(`A new booking request came in for ${params.roomName}.`)}
     ${summaryTableHtml(rows)}
-    ${paragraphHtml("Respond within 24 hours in the host queue, or it will auto-decline and release the hold.")}
   `;
   const text = [
+    banner,
+    `Host queue: ${queueUrl}`,
+    "",
     `A new booking request came in for ${params.roomName}.`,
     "",
     ...rows.map((r) => `${r.label}: ${r.value}`),
-    "",
-    "Respond within 24 hours in the host queue, or it will auto-decline and release the hold.",
   ].join("\n");
   return { subject, html: emailLayout({ title: "New booking request", bodyHtml }), text };
+}
+
+export function renderHostDecisionReminderEmail(params: HostNewRequestParams & { hoursLabel: string }): RenderedEmail {
+  const subject = reminderSubject({ ...params }, params.hoursLabel);
+  const queueUrl = hostQueueUrl();
+  const banner = `REMINDER: this request auto-declines in ${params.hoursLabel}${params.hostActionDeadlineAt ? ` (${formatChicago(params.hostActionDeadlineAt)} Central)` : ""}. Accept or decline now.`;
+  const rows = [
+    { label: "Guest", value: params.guestName },
+    { label: "Email", value: params.guestEmail },
+    ...summaryRows(params),
+  ];
+  const bodyHtml = `${deadlineBannerHtml(banner, queueUrl)}${summaryTableHtml(rows)}`;
+  const text = [banner, `Host queue: ${queueUrl}`, "", ...rows.map((r) => `${r.label}: ${r.value}`)].join("\n");
+  return { subject, html: emailLayout({ title: "Booking request reminder", bodyHtml }), text };
 }
 
 export interface HostBookingCancelledParams extends BookingEmailParams {
@@ -373,7 +406,7 @@ export interface HostBookingCancelledParams extends BookingEmailParams {
 
 export function renderHostBookingCancelledEmail(params: HostBookingCancelledParams): RenderedEmail {
   const who = params.cancelledBy === "guest" ? "the guest" : "staff";
-  const subject = `Booking cancelled by ${who} — ${params.roomName}`;
+  const subject = cancelledSubject({ ...params });
   const outcome =
     params.action === "release_hold"
       ? "Card hold released (never charged)"

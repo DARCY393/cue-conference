@@ -156,6 +156,9 @@ export interface Booking {
   stripePaymentIntentId?: string;
   googleEventId?: string;
   reminderSentAt?: string;
+  /** Host decision reminders (6h / 2h before the auto-decline deadline); internal. */
+  hostReminder6hSentAt?: string;
+  hostReminder2hSentAt?: string;
   /** Set atomically by the first cancel request (internal idempotency claim). */
   cancelClaimedAt?: string;
   /** What the cancellation refunded, in cents (0 for a released hold or no-refund). */
