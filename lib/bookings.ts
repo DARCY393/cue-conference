@@ -79,6 +79,7 @@ async function sendBookingRequestedEmails(booking: Booking, space: SpacePublic |
   await getEmailSender().send({
     to: booking.guestEmail || "guest@example.com",
     template: "booking_requested",
+    bookingId: booking.id,
     subject: requested.subject,
     html: requested.html,
     text: requested.text,
@@ -92,6 +93,7 @@ async function sendBookingRequestedEmails(booking: Booking, space: SpacePublic |
   await getEmailSender().send({
     to: process.env.HOST_EMAIL || "host@example.com",
     template: "host_new_request",
+    bookingId: booking.id,
     subject: host.subject,
     html: host.html,
     text: host.text,
@@ -106,7 +108,8 @@ async function sendBookingRequestedEmails(booking: Booking, space: SpacePublic |
       guestEmail: booking.guestEmail,
       hostActionDeadlineAt: booking.hostActionDeadlineAt,
     }),
-    `new_request ${booking.id}`
+    "new_request",
+    booking.id
   );
 }
 
@@ -731,6 +734,7 @@ export async function getBookingById(id: string): Promise<Booking | null> {
       ? new Date(r.completed_at as string).toISOString()
       : undefined,
     stripePaymentIntentId: (r.stripe_payment_intent_id as string) ?? undefined,
+    stripeChargeId: (r.stripe_charge_id as string) ?? undefined,
     googleEventId: (r.google_event_id as string) ?? undefined,
     hostReminder6hSentAt: r.host_reminder_6h_sent_at ? new Date(r.host_reminder_6h_sent_at as string).toISOString() : undefined,
     hostReminder2hSentAt: r.host_reminder_2h_sent_at ? new Date(r.host_reminder_2h_sent_at as string).toISOString() : undefined,
@@ -955,6 +959,7 @@ export async function cancelBooking(
     await getEmailSender().send({
       to: booking.guestEmail || "guest@example.com",
       template: "booking_cancelled",
+    bookingId: id,
       subject: cancelled.subject,
       html: cancelled.html,
       text: cancelled.text,
@@ -971,6 +976,7 @@ export async function cancelBooking(
     await getEmailSender().send({
       to: process.env.HOST_EMAIL || "host@example.com",
       template: "host_booking_cancelled",
+    bookingId: id,
       subject: host.subject,
       html: host.html,
       text: host.text,
@@ -987,7 +993,8 @@ export async function cancelBooking(
         refundCents,
         cancelledBy: actor,
       }),
-      `cancelled ${id}`
+      "cancelled",
+      id
     );
   } catch (err) {
     console.error(`[cancel] ${id}: email failed`, err instanceof Error ? err.message : err);
@@ -1035,6 +1042,7 @@ export async function expireBookingRequest(id: string) {
   await getEmailSender().send({
     to: booking.guestEmail || "guest@example.com",
     template: "booking_expired",
+    bookingId: booking.id,
     subject: expired.subject,
     html: expired.html,
     text: expired.text,
@@ -1096,6 +1104,36 @@ export async function expireOverdueRequests(): Promise<{ expiredIds: string[]; e
   return { expiredIds, expiredDraftIds };
 }
 
+/** latest_charge from a captured PaymentIntent (string id or expanded object). */
+export function latestChargeId(pi: unknown): string | undefined {
+  const lc = (pi as { latest_charge?: unknown } | null | undefined)?.latest_charge;
+  if (typeof lc === "string" && lc) return lc;
+  if (lc && typeof lc === "object" && typeof (lc as { id?: unknown }).id === "string") return (lc as { id: string }).id;
+  return undefined;
+}
+
+/**
+ * Accepted (captured) bookings whose end time has passed -> 'completed'. Idempotent; no Stripe,
+ * no email, no calendar. Runs from the expire job every 15 minutes.
+ */
+export async function completeFinishedBookings(now: Date = new Date()): Promise<{ completedIds: string[] }> {
+  if (isDemoMode()) {
+    const completedAt = now.toISOString();
+    const ids = getStore()
+      .bookings.filter((b) => (b.status === "accepted" || b.status === "in_progress") && new Date(b.endsAt) <= now)
+      .map((b) => b.id);
+    for (const id of ids) getStore().updateBooking(id, { status: "completed", completedAt });
+    return { completedIds: ids };
+  }
+  const { rows } = await query<{ id: string }>(
+    `UPDATE bookings SET status = 'completed', completed_at = COALESCE(completed_at, $1)
+      WHERE status IN ('accepted','in_progress') AND ends_at <= $1 AND cancel_claimed_at IS NULL
+      RETURNING id`,
+    [now.toISOString()]
+  );
+  return { completedIds: rows.map((r) => String(r.id)) };
+}
+
 export async function acceptBooking(id: string) {
   const booking = await getBookingById(id);
   if (!booking) return { error: "not_found" as const, message: "Booking not found", status: 404 };
@@ -1144,8 +1182,10 @@ export async function acceptBooking(id: string) {
   if (booking.cancelClaimedAt) {
     return { error: "cancel_in_progress" as const, message: "This booking is being cancelled", status: 409 };
   }
+  let stripeChargeId: string | undefined;
   if (booking.stripePaymentIntentId) {
-    await capturePaymentIntent(booking.stripePaymentIntentId);
+    const captured = await capturePaymentIntent(booking.stripePaymentIntentId);
+    stripeChargeId = latestChargeId(captured);
   }
   const decidedAt = new Date().toISOString();
   let googleEventId: string | undefined;
@@ -1168,15 +1208,16 @@ export async function acceptBooking(id: string) {
   if (isDemoMode()) {
     const cur = getStore().getBooking(id);
     if (cur && cur.status === "requested" && !cur.cancelClaimedAt) {
-      getStore().updateBooking(id, { status: "accepted", decidedAt, googleEventId });
+      getStore().updateBooking(id, { status: "accepted", decidedAt, googleEventId, stripeChargeId });
     } else {
       acceptedRow = false;
     }
   } else {
     const res = await query(
-      `UPDATE bookings SET status = 'accepted', decided_at = $2, google_event_id = $3
+      `UPDATE bookings SET status = 'accepted', decided_at = $2, google_event_id = $3,
+              stripe_charge_id = COALESCE($4, stripe_charge_id)
        WHERE id = $1 AND status = 'requested' AND cancel_claimed_at IS NULL`,
-      [id, decidedAt, googleEventId ?? null]
+      [id, decidedAt, googleEventId ?? null, stripeChargeId ?? null]
     );
     acceptedRow = (res.rowCount ?? 0) > 0;
   }
@@ -1191,6 +1232,7 @@ export async function acceptBooking(id: string) {
   await getEmailSender().send({
     to: booking.guestEmail || "guest@example.com",
     template: "booking_accepted",
+    bookingId: booking.id,
     subject: confirmation.subject,
     html: confirmation.html,
     text: confirmation.text,
@@ -1226,6 +1268,7 @@ export async function declineBooking(id: string, reason?: string) {
   await getEmailSender().send({
     to: booking.guestEmail || "guest@example.com",
     template: "booking_declined",
+    bookingId: booking.id,
     subject: declined.subject,
     html: declined.html,
     text: declined.text,

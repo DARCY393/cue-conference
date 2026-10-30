@@ -154,6 +154,8 @@ export interface Booking {
   cancelledAt?: string;
   completedAt?: string;
   stripePaymentIntentId?: string;
+  /** The captured PaymentIntent's latest_charge (ch_...). */
+  stripeChargeId?: string;
   googleEventId?: string;
   reminderSentAt?: string;
   /** Host decision reminders (6h / 2h before the auto-decline deadline); internal. */

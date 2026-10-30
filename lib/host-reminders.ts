@@ -115,6 +115,7 @@ export async function sendHostDecisionReminders(
       await getEmailSender().send({
         to: process.env.HOST_EMAIL || "host@example.com",
         template: `host_decision_reminder_${slot}`,
+        bookingId: id,
         subject: email.subject,
         html: email.html,
         text: email.text,
@@ -122,7 +123,7 @@ export async function sendHostDecisionReminders(
     } catch (err) {
       console.error(`[host-reminder] ${id}: email failed`, err instanceof Error ? err.message : err);
     }
-    await sendHostSms(reminderSms(facts, label), `reminder_${slot} ${id}`);
+    await sendHostSms(reminderSms(facts, label), `reminder_${slot}`, id);
     reminded.push({ id, slot });
   }
   return { reminded };

@@ -7,9 +7,11 @@
  * Never throws: a text failing must not break the booking flow. Logs mask numbers to the last 4.
  */
 import { emailSubjectPrefix } from "./email";
+import { recordDelivery } from "./delivery-log";
 
 export interface SmsSender {
-  send(to: string, body: string): Promise<void>;
+  /** Returns the provider message id (Twilio SID) when known. */
+  send(to: string, body: string): Promise<string | void>;
 }
 
 export function maskPhone(phone: string): string {
@@ -45,7 +47,7 @@ function twilioConfig(): TwilioConfig | null {
 
 class TwilioSmsSender implements SmsSender {
   constructor(private cfg: TwilioConfig) {}
-  async send(to: string, body: string): Promise<void> {
+  async send(to: string, body: string): Promise<string | void> {
     const form = new URLSearchParams({ To: to, Body: body });
     if (this.cfg.messagingServiceSid) form.set("MessagingServiceSid", this.cfg.messagingServiceSid);
     else if (this.cfg.from) form.set("From", this.cfg.from);
@@ -70,6 +72,12 @@ class TwilioSmsSender implements SmsSender {
       }
       throw new Error(`Twilio HTTP ${res.status}${detail ? `: ${detail}` : ""}`);
     }
+    try {
+      const j = (await res.json()) as { sid?: string };
+      return j.sid;
+    } catch {
+      return undefined;
+    }
   }
 }
 
@@ -84,26 +92,31 @@ export function smsPrefix(): string {
 }
 
 /** Text every HOST_ALERT_SMS_TO number. Returns how many sends succeeded. Never throws. */
-export async function sendHostSms(body: string, kind: string): Promise<number> {
+export async function sendHostSms(body: string, kind: string, bookingId?: string): Promise<number> {
   try {
     const recipients = parseSmsRecipients(process.env.HOST_ALERT_SMS_TO);
     const cfg = twilioConfig();
     const sender = overrideSender ?? (cfg ? new TwilioSmsSender(cfg) : null);
     if (!sender || recipients.length === 0) {
-      console.log(
-        `[sms] skipped ${kind}: ${!sender ? "Twilio not configured" : "HOST_ALERT_SMS_TO not set"}`
-      );
+      const reason = !sender ? "Twilio not configured" : "HOST_ALERT_SMS_TO not set";
+      console.log(`[sms] skipped ${kind}: ${reason}`);
+      for (const to of recipients.length ? recipients : [""]) {
+        await recordDelivery({ bookingId, channel: "sms", kind, recipient: to, status: "skipped", error: reason });
+      }
       return 0;
     }
     const text = `${smsPrefix()}${body}`;
     let ok = 0;
     for (const to of recipients) {
       try {
-        await sender.send(to, text);
+        const sid = await sender.send(to, text);
         ok++;
         console.log(`[sms] sent ${kind} to ${maskPhone(to)}`);
+        await recordDelivery({ bookingId, channel: "sms", kind, recipient: to, status: "sent", providerId: sid || null });
       } catch (err) {
-        console.error(`[sms] send failed ${kind} to ${maskPhone(to)}: ${err instanceof Error ? err.message : String(err)}`);
+        const error = err instanceof Error ? err.message : String(err);
+        console.error(`[sms] send failed ${kind} to ${maskPhone(to)}: ${error}`);
+        await recordDelivery({ bookingId, channel: "sms", kind, recipient: to, status: "failed", error });
       }
     }
     return ok;

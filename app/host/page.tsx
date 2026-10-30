@@ -19,7 +19,7 @@ function formatChicago(iso: string): string {
   }).format(new Date(iso));
 }
 
-const STATUS_FILTERS = ["requested", "accepted", "declined", "cancelled", ""] as const;
+const STATUS_FILTERS = ["requested", "accepted", "completed", "declined", "cancelled", ""] as const;
 
 const HOLD_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
   requested: { label: "Hold placed", tone: "warning" },

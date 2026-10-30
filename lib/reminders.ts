@@ -60,6 +60,7 @@ export async function sendDueReminders(now: Date = new Date()): Promise<{ remind
     await getEmailSender().send({
       to: booking.guestEmail || "guest@example.com",
       template: "booking_reminder",
+      bookingId: id,
       subject,
       html,
       text,

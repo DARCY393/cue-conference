@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { expireOverdueRequests } from "../lib/bookings";
+import { completeFinishedBookings, expireOverdueRequests } from "../lib/bookings";
 import { sendDueReminders } from "../lib/reminders";
 import { sendHostDecisionReminders } from "../lib/host-reminders";
 
@@ -17,6 +17,13 @@ async function main() {
     console.log(
       `Discarded ${result.expiredDraftIds.length} abandoned checkout draft(s): ${result.expiredDraftIds.join(", ")}`
     );
+  }
+
+  const done = await completeFinishedBookings();
+  if (done.completedIds.length === 0) {
+    console.log("No finished bookings to mark completed.");
+  } else {
+    console.log(`Marked ${done.completedIds.length} finished booking(s) completed: ${done.completedIds.join(", ")}`);
   }
 
   const hostReminders = await sendHostDecisionReminders();

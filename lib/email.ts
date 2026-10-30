@@ -1,3 +1,5 @@
+import { recordDelivery } from "./delivery-log";
+
 export interface EmailMessage {
   to: string;
   template: string;
@@ -6,15 +8,24 @@ export interface EmailMessage {
   html?: string;
   text?: string;
   replyTo?: string;
+  /** For the delivery log only; not sent. */
+  bookingId?: string;
+}
+
+/** What a sender reports back. Older/test senders may return nothing (treated as sent). */
+export interface EmailSendResult {
+  status: "sent" | "failed" | "skipped";
+  messageId?: string;
+  error?: string;
 }
 
 export interface EmailSender {
-  send(message: EmailMessage): Promise<void>;
+  send(message: EmailMessage): Promise<EmailSendResult | void>;
 }
 
 /** Fallback when SMTP isn't configured — logs metadata only, never the full HTML body. */
 export class ConsoleEmailLogger implements EmailSender {
-  async send(message: EmailMessage): Promise<void> {
+  async send(message: EmailMessage): Promise<EmailSendResult> {
     console.log(
       JSON.stringify({
         channel: "email",
@@ -25,6 +36,7 @@ export class ConsoleEmailLogger implements EmailSender {
         replyTo: message.replyTo,
       })
     );
+    return { status: "skipped", error: "SMTP not configured" };
   }
 }
 
@@ -57,10 +69,10 @@ export class SmtpEmailSender implements EmailSender {
     return this.transporter;
   }
 
-  async send(message: EmailMessage): Promise<void> {
+  async send(message: EmailMessage): Promise<EmailSendResult> {
     try {
       const transporter = await this.getTransporter();
-      await transporter.sendMail({
+      const info = await transporter.sendMail({
         from: process.env.EMAIL_FROM,
         to: message.to,
         subject: message.subject,
@@ -68,13 +80,16 @@ export class SmtpEmailSender implements EmailSender {
         html: message.html,
         replyTo: message.replyTo,
       });
+      return { status: "sent", messageId: info?.messageId };
     } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
       console.error("[email] send failed", {
         to: message.to,
         subject: message.subject,
         template: message.template,
-        error: err instanceof Error ? err.message : String(err),
+        error,
       });
+      return { status: "failed", error };
     }
   }
 }
@@ -111,9 +126,26 @@ function baseSender(): EmailSender {
 export function getEmailSender(): EmailSender {
   const sender = baseSender();
   const prefix = emailSubjectPrefix();
-  if (!prefix) return sender;
   return {
-    send: (message: EmailMessage) => sender.send({ ...message, subject: applySubjectPrefix(message.subject, prefix) }),
+    send: async (message: EmailMessage): Promise<EmailSendResult> => {
+      const out = prefix ? { ...message, subject: applySubjectPrefix(message.subject, prefix) } : message;
+      let result: EmailSendResult;
+      try {
+        result = (await sender.send(out)) || { status: "sent" };
+      } catch (err) {
+        result = { status: "failed", error: err instanceof Error ? err.message : String(err) };
+      }
+      await recordDelivery({
+        bookingId: message.bookingId,
+        channel: "email",
+        kind: message.template,
+        recipient: message.to,
+        status: result.status,
+        providerId: result.messageId,
+        error: result.error,
+      });
+      return result;
+    },
   };
 }
 
