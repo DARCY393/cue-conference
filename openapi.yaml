@@ -470,47 +470,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /contact:
-    post:
-      tags: [Contact]
-      operationId: submitContactForm
-      summary: Room page "Questions?" form
-      description: |
-        NOTE: unlike every other path in this document, this route is NOT
-        mounted under `/v1` — it lives at `/api/contact` at the app root
-        (`app/api/contact/route.ts`), so the effective URL is this server's
-        origin + `/api/contact`, not `{server}/contact`.
-        Validates name/email/message, silently no-ops on a filled honeypot
-        (`website`) field, and rate-limits to 5 requests per 10 minutes per
-        IP. Emails `CONTACT_EMAIL` (default darcy@thecue.work) with `replyTo`
-        set to the guest's address.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ContactRequest'
+  /inquiries:
+    get:
+      summary: Form token for "Ask a question"
+      description: Signed timestamp used for the min time-to-submit check, plus the Turnstile site key (null if not configured).
       responses:
         '200':
-          description: Sent (or silently dropped if the honeypot was filled)
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [ok]
-                properties:
-                  ok:
-                    type: boolean
-                    const: true
+          description: Token
+    post:
+      summary: Submit a pre-booking question
+      description: >-
+        Fields name, email, message (<=2000), optional phone, roomSlug, preferredDate (YYYY-MM-DD),
+        plus formToken, website (honeypot) and turnstileToken. Spam gets a fake 200 and nothing is
+        sent. Real questions email HOST_EMAIL (Reply-To asker) and acknowledge the asker.
+      responses:
+        '200':
+          description: Accepted
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: Validation error
         '429':
-          description: Too many requests from this IP
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
+          description: Rate limited (3/hour, 10/day per IP and per email)
+  /host/inquiries:
+    get:
+      summary: Staff list of pre-booking questions (read-only)
+      responses:
+        '200':
+          description: Questions, newest first
   /internal/expire-requests:
     post:
       tags: [Internal]

@@ -51,12 +51,24 @@ function previewLabel(p: CancelPreview | undefined): string {
   return "No refund (inside 48h)";
 }
 
+type Inquiry = {
+  id: string;
+  spaceTitle: string | null;
+  name: string;
+  email: string;
+  phone: string | null;
+  preferredDate: string | null;
+  message: string;
+  createdAt: string;
+};
+
 export default function HostPage() {
   const router = useRouter();
   const [staff, setStaff] = useState<StaffUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [blockouts, setBlockouts] = useState<Blockout[]>([]);
+  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("requested");
   const [boStart, setBoStart] = useState("");
@@ -69,6 +81,14 @@ export default function HostPage() {
   );
 
   const headers = useCallback(() => ({ "Content-Type": "application/json" }), []);
+
+  useEffect(() => {
+    if (!staff) return;
+    fetch("/api/v1/host/inquiries")
+      .then((r) => (r.ok ? r.json() : { data: [] }))
+      .then((d: { data?: Inquiry[] }) => setInquiries(d.data ?? []))
+      .catch(() => undefined);
+  }, [staff]);
 
   useEffect(() => {
     fetch("/api/v1/staff/me")
@@ -444,6 +464,34 @@ export default function HostPage() {
           </div>
         </div>
       )}
+
+      <section data-testid="host-inquiries" className="space-y-3">
+        <h2 className="text-2xl">Questions</h2>
+        <p className="text-sm text-cue-stone-500">
+          From &ldquo;Ask a question&rdquo; on the room pages. Reply from the email we sent you, or click an address.
+        </p>
+        {inquiries.length === 0 ? (
+          <p className="text-sm text-cue-stone-500">No questions yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {inquiries.slice(0, 50).map((q) => (
+              <li key={q.id} className="cue-card space-y-1 p-4 text-sm">
+                <p className="flex flex-wrap gap-x-3 text-cue-stone-500">
+                  <span className="font-semibold text-cue-navy-600">{q.name}</span>
+                  <a href={`mailto:${q.email}?subject=${encodeURIComponent(`Re: Question about ${q.spaceTitle ?? "The Cue"}`)}`}>{q.email}</a>
+                  {q.phone && <span>{q.phone}</span>}
+                  {q.spaceTitle && <span>· {q.spaceTitle}</span>}
+                  {q.preferredDate && <span>· wants {q.preferredDate}</span>}
+                  <span className="ml-auto">
+                    {new Date(q.createdAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} CT
+                  </span>
+                </p>
+                <p className="whitespace-pre-wrap text-cue-stone-700">{q.message}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="space-y-3">
         <h2 className="text-2xl">Blockouts</h2>

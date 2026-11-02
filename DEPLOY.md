@@ -159,8 +159,9 @@ SMTP_USER=REPLACE_ME
 SMTP_PASS=REPLACE_ME
 EMAIL_FROM="Cue <noreply@thecue.work>"
 
-# "To" address for the room-page contact form. Defaults to darcy@thecue.work.
-# CONTACT_EMAIL=darcy@thecue.work
+# Optional Cloudflare Turnstile for the "Ask a question" form (both or neither).
+# TURNSTILE_SITE_KEY=
+# TURNSTILE_SECRET_KEY=
 
 # Signs the staff session cookie for /host and /api/v1/host/* (see §13).
 # Required — the app refuses to start the staff session system without it
@@ -528,7 +529,7 @@ manual SQL step, not part of this script.)
 - [ ] `?embed=1` on a room page hides header/footer and renders compactly
 - [ ] iframe test page on a `thecue.work`-origin host actually loads the embed (not blocked by CSP)
 - [ ] Add 1+ parking passes on a booking — quote shows a separate Parking line, total includes it, and it's not reduced by the 8h+ discount
-- [ ] Submit the room page's "Questions?" form — `CONTACT_EMAIL` (or `darcy@thecue.work`) receives it with `replyTo` set to the guest's address
+- [ ] Submit "Ask a question" on a room page — HOST_EMAIL gets it with Reply-To = the asker, and the asker gets an acknowledgement
 - [ ] With SMTP env vars set, confirm the booking-request/accept emails actually arrive (not just console logs)
 
 ## 17. Booking-expiry cron (also sends reminder emails)

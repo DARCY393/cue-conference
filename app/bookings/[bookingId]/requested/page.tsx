@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { CheckCircle2, Mail, ShieldCheck } from "lucide-react";
-import { ContactForm } from "@/components/ContactForm";
+import { AskQuestionButton, AskQuestionDialog } from "@/components/AskQuestion";
 import { getBookingById } from "@/lib/bookings";
 import { cancelPagePath, verifyBookingAccessToken } from "@/lib/booking-access";
 import { formatMoney } from "@/lib/format";
@@ -232,7 +232,8 @@ export default async function RequestedPage({
             {CONTACT_NAME} — <a href={`tel:${CONTACT_PHONE_TEL}`}>{CONTACT_PHONE_DISPLAY}</a>, or stop by {CONTACT_SUITE}.
             You can also send us a message:
           </p>
-          <ContactForm roomName={booking.spaceTitle} roomSlug={booking.spaceSlug} />
+          <AskQuestionButton testId="ask-question-requested" />
+          <AskQuestionDialog roomName={booking.spaceTitle} roomSlug={booking.spaceSlug} />
         </div>
       </FullBleed>
     </>

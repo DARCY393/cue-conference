@@ -12,7 +12,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Clock, CreditCard, MapPin, Users } from "lucide-react";
 import type { Quote, SpacePublic } from "@/lib/types";
 import HouseRules from "@/components/HouseRules";
-import { ContactForm } from "@/components/ContactForm";
+import { AskQuestionButton, AskQuestionDialog } from "@/components/AskQuestion";
 import { HoldNotice } from "@/components/HoldNotice";
 import {
   RESERVE_ANCHOR,
@@ -44,6 +44,34 @@ function newRequestKey(): string {
   const c = typeof globalThis !== "undefined" ? globalThis.crypto : undefined;
   if (c && "randomUUID" in c) return c.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+const AV_KEYS = ["screen", "monitor", "apple_tv", "projector", "conference_phone", "whiteboard"];
+
+/** FAQ built only from facts already on the room page (amenities, parking, hours, cancellation). */
+function roomFaq(space: SpacePublic): { q: string; a: string }[] {
+  const keys = new Set(space.amenities.map((a) => a.key));
+  const av = space.amenities.filter((a) => AV_KEYS.includes(a.key)).map((a) => a.label);
+  const out: { q: string; a: string }[] = [
+    { q: "When can I book?", a: "Monday–Friday, 8am–6pm Central, with a 1-hour minimum." },
+    {
+      q: "Is there parking?",
+      a: "Parking under the building is available only if pre-booked. Public parking is across the street at 720 N. Ervay St.",
+    },
+  ];
+  if (keys.has("wifi")) out.push({ q: "Is there Wi-Fi?", a: "Yes. Wi-Fi is included, and we send the details with your confirmation." });
+  if (av.length) out.push({ q: "What AV is in the room?", a: `${av.join(", ")}.` });
+  if (space.cancellationPolicy) {
+    out.push({
+      q: "What if I need to cancel?",
+      a: "Free cancellation up to 48 hours before your booking; no refund after that.",
+    });
+  }
+  out.push({
+    q: "How does booking work?",
+    a: "Request a time and we hold your card. Staff respond within 24 hours, and you're only charged once we accept.",
+  });
+  return out;
 }
 
 function RoomPlaceholder({ code, capacity }: { code: string; capacity: string }) {
@@ -544,7 +572,10 @@ export default function SpacePage() {
               )}
             </p>
           </div>
-          <RequestToBookButton className="rounded-full px-8" testId="request-to-book-hero" />
+          <div className="flex flex-wrap items-center gap-3">
+            <RequestToBookButton className="rounded-full px-8" testId="request-to-book-hero" />
+            <AskQuestionButton onDark className="rounded-full px-6" testId="ask-question-hero" />
+          </div>
         </div>
       </FullBleed>
 
@@ -563,7 +594,10 @@ export default function SpacePage() {
                   {space.description}
                 </p>
               </div>
-              <RequestToBookButton testId="request-to-book-about" />
+              <div className="flex flex-wrap items-center gap-3">
+                <RequestToBookButton testId="request-to-book-about" />
+                <AskQuestionButton testId="ask-question-about" />
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <span className="cue-chip">
@@ -898,16 +932,27 @@ export default function SpacePage() {
         </FullBleed>
       )}
 
-      {/* Questions / contact */}
+      {/* Questions: quick answers, then "Ask a question" */}
       <FullBleed className="-mb-10 bg-white">
-        <div className="mx-auto max-w-[920px] space-y-4 px-4 py-14 sm:px-6">
-          <h2 className="text-2xl">Questions?</h2>
-          <p className="text-sm text-cue-stone-700">
-            D&apos;Arcy Young — <a href="tel:+12148834174">214-883-4174</a>, or stop by suite 212.
-          </p>
-          <ContactForm roomName={space.title} roomSlug={space.slug} />
+        <div id="questions" className="mx-auto max-w-[920px] space-y-6 px-4 py-14 sm:px-6">
+          <div>
+            <h2 className="text-2xl">Questions?</h2>
+            <p className="mt-2 text-sm text-cue-stone-700">
+              Quick answers below. Anything else, ask us and we&apos;ll reply by email, usually within a business day.
+            </p>
+          </div>
+          <dl data-testid="room-faq" className="grid gap-x-8 gap-y-5 text-sm sm:grid-cols-2">
+            {roomFaq(space).map((f) => (
+              <div key={f.q}>
+                <dt className="font-semibold text-cue-navy-600">{f.q}</dt>
+                <dd className="mt-1 leading-relaxed text-cue-stone-700">{f.a}</dd>
+              </div>
+            ))}
+          </dl>
+          <AskQuestionButton testId="ask-question-faq" />
         </div>
       </FullBleed>
+      <AskQuestionDialog roomName={space.title} roomSlug={space.slug} />
     </>
   );
 }

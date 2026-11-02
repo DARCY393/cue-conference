@@ -401,7 +401,8 @@ OpenAPI: [`openapi.yaml`](./openapi.yaml). Routes are mounted under **`/api/v1`*
 | GET | `/api/v1/staff/me` | Current staff user, or 401 |
 | POST | `/api/v1/webhooks/stripe` | Stripe events |
 | POST | `/api/v1/internal/expire-requests` | Cron target — auto-decline overdue `requested` bookings, release each hold, send due reminders |
-| POST | `/api/contact` | Room-page "Questions?" form — not versioned under `/api/v1` |
+| GET/POST | `/api/v1/inquiries` | "Ask a question" form token / submit |
+| GET | `/api/v1/host/inquiries` | Staff: list questions |
 
 ### Auth
 
@@ -437,14 +438,23 @@ or a retry) never double-sends. Called from both `npm run bookings:expire`
 and `POST /api/v1/internal/expire-requests`, right after the overdue-request
 expiry scan.
 
-### Contact form
+### Ask a question (pre-booking inquiries)
 
-The room page's "Questions?" section posts to `POST /api/contact`
-(`app/api/contact/route.ts`), which validates `name`/`email`/`message`,
-silently no-ops on a filled honeypot field (`website`), rate-limits to 5
-requests per 10 minutes per IP (`x-forwarded-for`/`x-real-ip`), and emails
-`CONTACT_EMAIL` (default `darcy@thecue.work`) with `replyTo` set to the
-guest's address via the same `lib/email.ts` sender.
+Each room page (and the "requested" page) has an **Ask a question** button that opens a short
+form: name, email, optional phone, the room (prefilled), optional preferred date, and the
+question (max 2000 chars). `GET /api/v1/inquiries` hands the form a signed timestamp (and the
+Turnstile site key, if set); `POST /api/v1/inquiries` (`lib/inquiries.ts`) then:
+
+- runs invisible spam checks (`lib/inquiry-spam.ts`): honeypot field `website`, the signed
+  timestamp must be 3s–24h old, at most 2 links, no URL shorteners or spam keywords, and
+  Cloudflare Turnstile server-side when `TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` are set;
+- rate-limits per hashed IP and per email: 3/hour, 10/day (counted in the `inquiries` table) — 429;
+- stores every attempt in `inquiries` (migration 023) with an IP hash and `spam_verdict`;
+- for real questions only, emails `HOST_EMAIL` (Reply-To = asker; subject
+  `Question about <room> — <name>`, `[PREVIEW]` prefix on preview) and sends the asker an
+  acknowledgement. Both land in `message_logs`. No SMS. Spam gets a fake `200 {ok:true}`.
+
+Staff see real questions read-only under **Questions** on `/host` (`GET /api/v1/host/inquiries`).
 
 ## Project layout
 
