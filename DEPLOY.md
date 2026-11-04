@@ -199,9 +199,16 @@ NEXT_PUBLIC_APP_URL=https://book.thecue.work
 
 ```bash
 cd /srv/cue-conference
-sudo -u cue npm ci
+sudo -u cue npm ci --include=dev
 sudo -u cue env $(grep -v '^#' /etc/cue-conference.env | xargs -d '\n') npm run build
 ```
+
+> **Use `npm ci --include=dev`.** The env file sets `NODE_ENV=production`, so a plain
+> `npm ci` run with it loaded skips devDependencies (dotenv, TypeScript, Tailwind, tsx).
+> That breaks `npm run db:migrate` (`ERR_MODULE_NOT_FOUND: dotenv`) and `next build`, and
+> leaves the running app with a stripped node_modules until you reinstall. Always run
+> `npm ci --include=dev` on the live and preview boxes.
+
 
 (The build step needs the `NEXT_PUBLIC_*` vars present because Next.js bakes
 them into the client bundle — hence passing the env file through here, not
@@ -486,7 +493,7 @@ Update:
 ```bash
 cd /srv/cue-conference
 sudo -u cue git pull
-sudo -u cue npm ci
+sudo -u cue npm ci --include=dev
 sudo -u cue env DATABASE_URL='...' npm run db:migrate
 sudo -u cue env $(grep -v '^#' /etc/cue-conference.env | xargs -d '\n') npm run build
 sudo systemctl restart cue-conference
@@ -497,7 +504,7 @@ Rollback to the previous known-good state:
 ```bash
 cd /srv/cue-conference
 sudo -u cue git checkout <previous-tag-or-commit>
-sudo -u cue npm ci
+sudo -u cue npm ci --include=dev
 sudo -u cue env $(grep -v '^#' /etc/cue-conference.env | xargs -d '\n') npm run build
 sudo systemctl restart cue-conference
 ```
@@ -578,3 +585,16 @@ CUE_APP_ENV=preview
 
 Every outgoing email subject then starts with `[PREVIEW] `. Live
 (`/etc/cue-booking/env`) must not set it; unset means no prefix.
+
+## Parking list alert to an automation inbox
+
+`PARKING_ALERT_EXTRA_TO` (optional, comma-separated) adds addresses to the
+"guest saved their parking list" host alert only (template `host_parking_recipients`,
+body includes the booking ID). The 24h issued-status email and other host emails still go
+to `HOST_EMAIL` only. Set on live and preview:
+
+```
+PARKING_ALERT_EXTRA_TO=honeycomb-tenantadmin+parking@mail.grokbot.com
+```
+
+Restart the service after changing it (no rebuild needed).

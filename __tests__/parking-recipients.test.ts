@@ -107,6 +107,25 @@ describe("parking recipients flow", () => {
     expect(sanitizeBookingForPublic(host).parkingRecipients).toBeUndefined();
   });
 
+  it("sends the save alert (with booking id) to PARKING_ALERT_EXTRA_TO too, but not the 24h status email", async () => {
+    const prev = process.env.PARKING_ALERT_EXTRA_TO;
+    process.env.PARKING_ALERT_EXTRA_TO = "automation+parking@example.com";
+    try {
+      const b = await accepted(IDS.m4, 3, 1);
+      sent.length = 0;
+      expect((await saveParkingRecipients(b.id, [{ contact: "a@b.co" }])).ok).toBe(true);
+      const alert = sent.find((m) => m.template === "host_parking_recipients")!;
+      expect(alert.to).toContain("automation+parking@example.com");
+      expect(alert.text).toContain(b.id);
+      await sendDueParkingStatusAlerts(new Date(new Date(b.startsAt).getTime() - 2 * H));
+      const status = sent.find((m) => m.template === "host_parking_status")!;
+      expect(status.to).not.toContain("automation+parking@example.com");
+    } finally {
+      if (prev === undefined) delete process.env.PARKING_ALERT_EXTRA_TO;
+      else process.env.PARKING_ALERT_EXTRA_TO = prev;
+    }
+  });
+
   it("rejects saves with too many rows, empty lists, or after the booking starts", async () => {
     const b = await accepted(IDS.m3, 24 * 3, 1);
     expect(await saveParkingRecipients(b.id, [{ email: "a@b.co" }, { email: "c@d.co" }])).toMatchObject({ ok: false, status: 400 });

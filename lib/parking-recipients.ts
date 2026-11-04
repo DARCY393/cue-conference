@@ -317,7 +317,7 @@ export async function saveParkingRecipients(bookingId: string, input: unknown, n
     recipients: v.recipients,
   });
   await getEmailSender().send({
-    to: process.env.HOST_EMAIL || "host@example.com",
+    to: parkingRecipientsAlertTo(),
     template: "host_parking_recipients",
     bookingId: b.id,
     subject: host.subject,
@@ -325,6 +325,19 @@ export async function saveParkingRecipients(bookingId: string, input: unknown, n
     text: host.text,
   });
   return { ok: true, recipients: v.recipients };
+}
+
+/**
+ * Recipients for the "guest saved their parking list" alert only: HOST_EMAIL plus any
+ * comma-separated PARKING_ALERT_EXTRA_TO (e.g. an automation inbox). Other host emails
+ * (incl. the 24h status email) do not use this.
+ */
+export function parkingRecipientsAlertTo(): string {
+  const list = [process.env.HOST_EMAIL || "host@example.com", process.env.PARKING_ALERT_EXTRA_TO || ""]
+    .flatMap((s) => s.split(","))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [...new Set(list)].join(",");
 }
 
 // ---- issued status + 24h host status email ---------------------------------------------------
