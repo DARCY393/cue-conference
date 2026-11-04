@@ -211,6 +211,21 @@ export default function HostPage() {
     await load();
   }
 
+  async function setParkingIssued(bookingId: string, issued: boolean) {
+    setError(null);
+    const res = await fetch(`/api/v1/host/bookings/${bookingId}/parking-issued`, {
+      method: "POST",
+      headers: { ...headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({ issued }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(data.message || "Couldn't update parking status");
+      return;
+    }
+    await load();
+  }
+
   async function act(bookingId: string, action: "accept" | "decline") {
     setError(null);
     const res = await fetch(`/api/v1/host/bookings/${bookingId}/${action}`, {
@@ -348,6 +363,51 @@ export default function HostPage() {
                       ? ` · parking: ${b.parkingPasses} pass${b.parkingPasses === 1 ? "" : "es"}/day (${formatMoney(b.parkingCents ?? 0)})`
                       : ""}
                   </div>
+                  {(b.parkingPasses ?? 0) > 0 && ["accepted", "in_progress", "completed"].includes(b.status) && (
+                    <div className="text-sm text-cue-stone-700" data-testid={`parking-recipients-${b.id}`}>
+                      <span className="font-semibold text-cue-navy-600">Parking pass holders: </span>
+                      {b.parkingRecipients && b.parkingRecipients.length > 0 ? (
+                        <>
+                          <ul className="mt-1 list-disc pl-5">
+                            {b.parkingRecipients.map((r, i) => (
+                              <li key={i}>{r.phone || r.email}</li>
+                            ))}
+                          </ul>
+                          <span className="text-xs text-cue-stone-500">
+                            {b.parkingRecipients.length} of {b.parkingPasses}
+                            {b.parkingRecipientsUpdatedAt ? ` · updated ${formatChicago(b.parkingRecipientsUpdatedAt)} CT` : ""}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-cue-stone-500">not sent yet (guest was emailed a link)</span>
+                      )}
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {b.parkingPassesIssuedAt ? (
+                          <>
+                            <Badge tone="success">Passes issued</Badge>
+                            <span className="text-xs text-cue-stone-500">
+                              {formatChicago(b.parkingPassesIssuedAt)} CT{b.parkingPassesIssuedBy ? ` · ${b.parkingPassesIssuedBy}` : ""}
+                            </span>
+                            <button type="button" className="text-xs underline" onClick={() => setParkingIssued(b.id, false)}>
+                              Undo
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <Badge tone="warning">Passes not issued</Badge>
+                            <button
+                              type="button"
+                              className="btn btn-secondary px-3 py-1 text-xs"
+                              data-testid={`mark-parking-issued-${b.id}`}
+                              onClick={() => setParkingIssued(b.id, true)}
+                            >
+                              Mark passes issued
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 pt-1">
                     <Badge tone="neutral">{b.status}</Badge>
                     <Badge tone={hold.tone}>{hold.label}</Badge>

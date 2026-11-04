@@ -1,3 +1,7 @@
+/** Garage entrance for pre-booked parking (shared by emails and the parking-recipients page). */
+export const PARKING_ENTRANCE_TEXT =
+  "The parking entrance is under the building at 750 N Saint Paul St, Dallas, TX 75201, on the east side of Saint Paul St just south of Ross.";
+
 export interface ArrivalInstructionsInput {
   roomName: string;
   /** Reserved parking passes under the building (0 = none pre-booked). */
@@ -26,7 +30,7 @@ export function arrivalInstructionLines(input: ArrivalInstructionsInput): string
     parkingPasses > 0
       ? `Your reserved parking under the building is included: ${parkingPasses} pass${
           parkingPasses === 1 ? "" : "es"
-        } per day.`
+        } per day. ${PARKING_ENTRANCE_TEXT}`
       : "Parking is not available under the building unless you pre-booked it. There's public parking across the street at 720 N. Ervay St, Dallas, TX 75201.";
 
   return [

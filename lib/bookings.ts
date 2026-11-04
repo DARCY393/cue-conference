@@ -21,6 +21,7 @@ import {
   retrievePaymentIntent,
 } from "./stripe";
 import { getEmailSender } from "./email";
+import { getParkingMeta, getParkingRecipients, parkingPageUrl, sendParkingRequestOnAccept } from "./parking-recipients";
 import { sendHostSms } from "./sms";
 import { cancelledSms, newRequestSms } from "./host-alerts";
 import { cancelPageUrl } from "./booking-access";
@@ -145,6 +146,8 @@ export function sanitizeBookingForApi(b: Booking): Booking {
 /** For unauthenticated, id-addressed endpoints: also strip the guest's name and email. */
 export function sanitizeBookingForPublic(b: Booking): Booking {
   const copy = sanitizeBookingForApi(b);
+  delete copy.parkingRecipients;
+  delete copy.parkingPassesIssuedBy;
   delete copy.guestEmail;
   delete copy.guestName;
   delete copy.guestNotes;
@@ -1228,7 +1231,10 @@ export async function acceptBooking(id: string) {
     return { error: "cancel_in_progress" as const, message: "The guest cancelled this booking while it was being accepted", status: 409 };
   }
   const updated = (await getBookingById(id))!;
-  const confirmation = renderBookingConfirmationEmail(bookingEmailParams(updated, space));
+  const confirmation = renderBookingConfirmationEmail({
+    ...bookingEmailParams(updated, space),
+    parkingUrl: (updated.parkingPasses ?? 0) > 0 ? parkingPageUrl(updated.id) : undefined,
+  });
   await getEmailSender().send({
     to: booking.guestEmail || "guest@example.com",
     template: "booking_accepted",
@@ -1237,6 +1243,12 @@ export async function acceptBooking(id: string) {
     html: confirmation.html,
     text: confirmation.text,
   });
+  // Parking booked → ask the guest who gets each pass (gate QR codes). Never blocks the accept.
+  try {
+    await sendParkingRequestOnAccept(updated);
+  } catch (err) {
+    console.error(`[parking] accept(${id}): ${err instanceof Error ? err.message : String(err)}`);
+  }
   return { booking: updated, calendarSyncWarning };
 }
 
@@ -1332,6 +1344,18 @@ export async function chargeOvertime(id: string, extraMinutes: number, note?: st
   };
 }
 
+async function withParkingRecipients(b: Booking): Promise<Booking> {
+  if (!(b.parkingPasses ?? 0)) return b;
+  const [recipients, meta] = await Promise.all([getParkingRecipients(b.id), getParkingMeta(b.id)]);
+  return {
+    ...b,
+    parkingRecipients: recipients,
+    parkingRecipientsUpdatedAt: meta.updatedAt,
+    parkingPassesIssuedAt: meta.issuedAt,
+    parkingPassesIssuedBy: meta.issuedBy,
+  };
+}
+
 export async function listHostBookings(opts: {
   status?: string;
   from?: string;
@@ -1339,7 +1363,7 @@ export async function listHostBookings(opts: {
 }) {
   await expireOverdueRequests();
   if (isDemoMode()) {
-    return getStore().listHostBookings(opts);
+    return Promise.all(getStore().listHostBookings(opts).map(withParkingRecipients));
   }
   // All spaces for the seeded host (multi-location ready)
   const params: unknown[] = [IDS.host];
@@ -1364,7 +1388,7 @@ export async function listHostBookings(opts: {
   const out: Booking[] = [];
   for (const r of rows) {
     const b = await getBookingById(String(r.id));
-    if (b) out.push(b);
+    if (b) out.push(await withParkingRecipients(b));
   }
   return out;
 }

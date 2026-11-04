@@ -1,5 +1,5 @@
-import { cancelledSubject, hostQueueUrl, newRequestSubject, reminderSubject } from "./host-alerts";
-import { arrivalInstructionLines } from "./arrival-instructions";
+import { cancelledSubject, hostQueueUrl, newRequestSubject, reminderSubject, shortDateRange } from "./host-alerts";
+import { arrivalInstructionLines, PARKING_ENTRANCE_TEXT } from "./arrival-instructions";
 import { formatMoney } from "./format";
 import {
   CONTACT_NAME,
@@ -123,6 +123,8 @@ export interface BookingEmailParams {
   discountLabel?: string;
   /** Tokenized guest self-cancel link (see cancelPageUrl in lib/booking-access.ts). */
   cancelUrl?: string;
+  /** Tokenized "who gets a parking pass" page; shown in the confirmation when parking was booked. */
+  parkingUrl?: string;
 }
 
 function cancelLinkHtml(url: string | undefined, note: string): string {
@@ -237,6 +239,13 @@ export function renderBookingRequestedEmail(params: BookingEmailParams): Rendere
   return { subject, html: emailLayout({ title: "Booking request received", bodyHtml }), text };
 }
 
+const PARKING_CONFIRM_NOTE =
+  "You booked parking. We'll email you separately to ask who gets each pass, or you can add them now.";
+
+function buttonHtml(url: string, label: string): string {
+  return `<div style="margin:4px 0 18px;"><a href="${escapeHtml(url)}" style="display:inline-block;padding:11px 20px;border-radius:8px;background:${COPPER};color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;">${escapeHtml(label)}</a></div>`;
+}
+
 export function renderBookingConfirmationEmail(params: BookingEmailParams): RenderedEmail {
   const subject = `Booking confirmed — ${params.roomName}`;
   const arrivalLines = arrivalInstructionLines({
@@ -248,6 +257,7 @@ export function renderBookingConfirmationEmail(params: BookingEmailParams): Rend
     ${summaryTableHtml(summaryRows(params, { totalLabel: "Charged" }))}
     ${paragraphHtml(`Cancellation policy: ${CANCELLATION_POLICY_TEXT}`)}
     ${cancelLinkHtml(params.cancelUrl, CONFIRMED_CANCEL_NOTE)}
+    ${params.parkingUrl && params.parkingPasses > 0 ? `${paragraphHtml(PARKING_CONFIRM_NOTE)}${buttonHtml(params.parkingUrl, "Add parking pass holders")}` : ""}
     <h2 style="margin:20px 0 10px;font-family:${FONT_DISPLAY};font-weight:400;font-size:16px;color:${NAVY};">Arrival instructions</h2>
     ${listHtml(arrivalLines)}
   `;
@@ -258,6 +268,7 @@ export function renderBookingConfirmationEmail(params: BookingEmailParams): Rend
     "",
     `Cancellation policy: ${CANCELLATION_POLICY_TEXT}`,
     ...cancelLinkText(params.cancelUrl, CONFIRMED_CANCEL_NOTE),
+    ...(params.parkingUrl && params.parkingPasses > 0 ? ["", PARKING_CONFIRM_NOTE, `Add parking pass holders: ${params.parkingUrl}`] : []),
     "",
     "Arrival instructions:",
     ...arrivalLines.map((l) => `- ${l}`),
@@ -427,4 +438,142 @@ export function renderHostBookingCancelledEmail(params: HostBookingCancelledPara
   const bodyHtml = `${paragraphHtml(intro)}${summaryTableHtml(rows)}`;
   const text = [intro, "", ...rows.map((r) => `${r.label}: ${r.value}`)].join("\n");
   return { subject, html: emailLayout({ title: "Booking cancelled", bodyHtml }), text };
+}
+
+// ---- Parking pass recipients ------------------------------------------------------------------
+
+export const PARKING_NO_MARKETING_TEXT =
+  "We only use these details to send parking passes for this booking. They won't be used for marketing.";
+export const PARKING_QR_TEXT =
+  "Each person on the list will receive a QR code by text or email. They scan it at the gate when they drive in.";
+
+function passWord(n: number) {
+  return `${n} parking pass${n === 1 ? "" : "es"}`;
+}
+
+export function renderParkingRecipientsRequestEmail(params: {
+  roomName: string;
+  startsAt: string;
+  endsAt: string;
+  parkingPasses: number;
+  url: string;
+  reminder?: boolean;
+}): RenderedEmail {
+  const subject = params.reminder
+    ? `Reminder: who's using your parking passes? — ${params.roomName}`
+    : `Parking passes: tell us who's coming — ${params.roomName}`;
+  const intro = params.reminder
+    ? `Your booking for ${params.roomName} is coming up, and we still don't know who's using your ${passWord(params.parkingPasses)}.`
+    : `Thanks for booking ${params.roomName}. Your booking includes ${passWord(params.parkingPasses)}.`;
+  const ask =
+    "Please send us the mobile number or email of each person who will get a parking pass. It only takes a minute.";
+  const rows = [
+    { label: "Room", value: params.roomName },
+    { label: "Starts", value: formatChicago(params.startsAt) },
+    { label: "Ends", value: formatChicago(params.endsAt) },
+    { label: "Parking passes", value: String(params.parkingPasses), highlight: true },
+  ];
+  const bullets = [PARKING_QR_TEXT, PARKING_ENTRANCE_TEXT, PARKING_NO_MARKETING_TEXT];
+  const bodyHtml = `
+    ${paragraphHtml(intro)}
+    ${paragraphHtml(ask)}
+    ${buttonHtml(params.url, "Add parking pass holders")}
+    ${summaryTableHtml(rows)}
+    <h2 style="margin:20px 0 10px;font-family:${FONT_DISPLAY};font-weight:400;font-size:16px;color:${NAVY};">Good to know</h2>
+    ${listHtml(bullets)}
+    <p style="margin:0;font-size:12px;line-height:1.5;color:${STONE_LIGHT};">You can update the list until your booking starts. Questions? ${escapeHtml(CONTACT_NAME)}, ${escapeHtml(CONTACT_PHONE_DISPLAY)}, or stop by ${escapeHtml(CONTACT_SUITE)}.</p>
+  `;
+  const text = [
+    intro,
+    "",
+    ask,
+    `Add parking pass holders: ${params.url}`,
+    "",
+    ...rows.map((r) => `${r.label}: ${r.value}`),
+    "",
+    ...bullets.map((b) => `- ${b}`),
+    "",
+    `You can update the list until your booking starts. Questions? ${CONTACT_NAME}, ${CONTACT_PHONE_DISPLAY}, or stop by ${CONTACT_SUITE}.`,
+  ].join("\n");
+  return {
+    subject,
+    html: emailLayout({ title: params.reminder ? "Who's using your parking passes?" : "Who's getting a parking pass?", bodyHtml }),
+    text,
+  };
+}
+
+export function renderHostParkingRecipientsEmail(params: {
+  roomName: string;
+  startsAt: string;
+  endsAt: string;
+  parkingPasses: number;
+  guestName: string;
+  guestEmail: string;
+  bookingId: string;
+  recipients: { phone?: string; email?: string }[];
+}): RenderedEmail {
+  const subject = `Parking passes to issue: ${params.recipients.length} of ${params.parkingPasses} — ${params.roomName}, ${shortDateRange(params.startsAt, params.endsAt)}`;
+  const intro = `${params.guestName} sent the parking pass list for their ${params.roomName} booking. Issue a gate QR code in Parkonect for each mobile number or email below.`;
+  const rows = [
+    { label: "Guest", value: params.guestName },
+    { label: "Email", value: params.guestEmail },
+    { label: "Room", value: params.roomName },
+    { label: "Starts", value: formatChicago(params.startsAt) },
+    { label: "Ends", value: formatChicago(params.endsAt) },
+    { label: "Passes booked", value: String(params.parkingPasses) },
+    { label: "Booking ID", value: params.bookingId },
+  ];
+  const lines = params.recipients.map(
+    (r, i) => `${i + 1}. ${r.phone || r.email || ""}`
+  );
+  const bodyHtml = `${paragraphHtml(intro)}${summaryTableHtml(rows)}
+    <h2 style="margin:20px 0 10px;font-family:${FONT_DISPLAY};font-weight:400;font-size:16px;color:${NAVY};">Pass holders</h2>
+    ${listHtml(lines)}
+    ${paragraphHtml("If the guest updates the list, you'll get another email with the full new list.")}`;
+  const text = [intro, "", ...rows.map((r) => `${r.label}: ${r.value}`), "", "Pass holders:", ...lines].join("\n");
+  return { subject, html: emailLayout({ title: "Parking pass list received", bodyHtml }), text };
+}
+
+export function renderHostParkingStatusEmail(params: {
+  roomName: string;
+  startsAt: string;
+  endsAt: string;
+  parkingPasses: number;
+  guestName: string;
+  guestEmail: string;
+  bookingId: string;
+  recipients: { phone?: string; email?: string }[];
+  issuedAt?: string;
+  issuedBy?: string;
+  issuedNote?: string;
+}): RenderedEmail {
+  const issued = Boolean(params.issuedAt);
+  const status = issued ? "ISSUED" : "NOT ISSUED";
+  const subject = `Parking passes ${status} — ${params.roomName}, ${shortDateRange(params.startsAt, params.endsAt)} (${params.parkingPasses} pass${params.parkingPasses === 1 ? "" : "es"})`;
+  const intro = issued
+    ? `Parking passes for this booking were marked issued in Parkonect. It starts within 24 hours.`
+    : `Parking passes for this booking have NOT been marked issued yet, and it starts within 24 hours. Issue them in Parkonect, then mark them issued on the host page.`;
+  const rows: { label: string; value: string; highlight?: boolean }[] = [
+    { label: "Status", value: status, highlight: true },
+    ...(issued ? [{ label: "Marked issued", value: `${formatChicago(params.issuedAt!)}${params.issuedBy ? ` by ${params.issuedBy}` : ""}` }] : []),
+    ...(params.issuedNote ? [{ label: "Note", value: params.issuedNote }] : []),
+    { label: "Guest", value: params.guestName },
+    { label: "Email", value: params.guestEmail },
+    { label: "Room", value: params.roomName },
+    { label: "Starts", value: formatChicago(params.startsAt) },
+    { label: "Ends", value: formatChicago(params.endsAt) },
+    { label: "Passes booked", value: String(params.parkingPasses) },
+    { label: "Pass holders submitted", value: `${params.recipients.length} of ${params.parkingPasses}` },
+    { label: "Booking ID", value: params.bookingId },
+  ];
+  const lines = params.recipients.length
+    ? params.recipients.map((r, i) => `${i + 1}. ${r.phone || r.email || ""}`)
+    : ["Guest has not submitted names yet (no mobile numbers or emails)."];
+  const queueUrl = hostQueueUrl();
+  const bodyHtml = `${paragraphHtml(intro)}${summaryTableHtml(rows)}
+    <h2 style="margin:20px 0 10px;font-family:${FONT_DISPLAY};font-weight:400;font-size:16px;color:${NAVY};">Pass holders</h2>
+    ${listHtml(lines)}
+    ${buttonHtml(queueUrl, "Open host page")}`;
+  const text = [intro, "", ...rows.map((r) => `${r.label}: ${r.value}`), "", "Pass holders:", ...lines, "", `Host page: ${queueUrl}`].join("\n");
+  return { subject, html: emailLayout({ title: `Parking passes ${status.toLowerCase()}`, bodyHtml }), text };
 }

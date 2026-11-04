@@ -2,6 +2,7 @@ import "dotenv/config";
 import { completeFinishedBookings, expireOverdueRequests } from "../lib/bookings";
 import { sendDueReminders } from "../lib/reminders";
 import { sendHostDecisionReminders } from "../lib/host-reminders";
+import { sendDueParkingReminders, sendDueParkingStatusAlerts } from "../lib/parking-recipients";
 
 async function main() {
   const result = await expireOverdueRequests();
@@ -42,6 +43,20 @@ async function main() {
     console.log(
       `Sent ${reminders.remindedIds.length} reminder email(s): ${reminders.remindedIds.join(", ")}`
     );
+  }
+
+  const parking = await sendDueParkingReminders();
+  if (parking.remindedIds.length === 0) {
+    console.log("No parking-list reminders due.");
+  } else {
+    console.log(`Sent ${parking.remindedIds.length} parking-list reminder(s): ${parking.remindedIds.join(", ")}`);
+  }
+
+  const status = await sendDueParkingStatusAlerts();
+  if (status.sentIds.length === 0) {
+    console.log("No parking-status host emails due.");
+  } else {
+    console.log(`Sent ${status.sentIds.length} parking-status host email(s): ${status.sentIds.join(", ")}`);
   }
 }
 

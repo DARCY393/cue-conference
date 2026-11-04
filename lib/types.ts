@@ -179,6 +179,11 @@ export interface Booking {
   spaceShortTitle?: string;
   locationName?: string;
   spaceSlug?: string;
+  /** Staff-only: who gets each parking pass (filled in by the guest after accept). */
+  parkingRecipients?: { phone?: string; email?: string }[];
+  parkingRecipientsUpdatedAt?: string;
+  parkingPassesIssuedAt?: string;
+  parkingPassesIssuedBy?: string;
 }
 
 export interface Blockout {

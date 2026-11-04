@@ -15,7 +15,8 @@
     "db:migrate:010": "node scripts/migrate-010.mjs",
     "staff:create": "tsx scripts/create-staff-user.ts",
     "bookings:expire": "tsx scripts/expire-bookings.ts",
-    "email:preview": "tsx scripts/render-email-preview.ts"
+    "email:preview": "tsx scripts/render-email-preview.ts",
+    "parking:issued": "tsx scripts/mark-parking-issued.ts"
   },
   "dependencies": {
     "@stripe/react-stripe-js": "^6.9.0",
