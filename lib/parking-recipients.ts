@@ -171,7 +171,8 @@ async function replaceRecipients(bookingId: string, list: ParkingRecipient[]): P
     demo().recipients.set(bookingId, list);
     return;
   }
-  // One statement so a concurrent save can't interleave a half-written list.
+  // One statement so a concurrent save can't interleave a half-written list. Needs the
+  // (booking_id, position) unique constraint to be DEFERRABLE (migration 025).
   const payload = JSON.stringify(list.map((r, i) => ({ position: i + 1, ...r })));
   await query(
     `WITH del AS (DELETE FROM parking_pass_recipients WHERE booking_id = $1)
