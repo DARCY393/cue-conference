@@ -44,7 +44,7 @@ function escapeHtml(value: string): string {
   });
 }
 
-function emailLayout(opts: { title: string; bodyHtml: string }): string {
+function emailLayout(opts: { title: string; bodyHtml: string; realLogo?: boolean }): string {
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background:${PAPER};font-family:${FONT_SANS};color:${INK};">
@@ -54,7 +54,7 @@ function emailLayout(opts: { title: string; bodyHtml: string }): string {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid ${BORDER};">
             <tr>
               <td style="background:${NAVY};padding:20px 28px;">
-                <span style="font-family:${FONT_DISPLAY};font-size:22px;font-weight:400;color:#ffffff;letter-spacing:0.02em;">cue</span>
+                ${opts.realLogo ? `<img src="${escapeHtml((process.env.NEXT_PUBLIC_APP_URL || "https://book.thecue.work").replace(/\/+$/, ""))}/branding/logo-cue-light.png" width="88" alt="Cue" style="display:block;width:88px;height:auto;" />` : `<span style="font-family:${FONT_DISPLAY};font-size:22px;font-weight:400;color:#ffffff;letter-spacing:0.02em;">cue</span>`}
               </td>
             </tr>
             <tr>
@@ -576,4 +576,39 @@ export function renderHostParkingStatusEmail(params: {
     ${buttonHtml(queueUrl, "Open host page")}`;
   const text = [intro, "", ...rows.map((r) => `${r.label}: ${r.value}`), "", "Pass holders:", ...lines, "", `Host page: ${queueUrl}`].join("\n");
   return { subject, html: emailLayout({ title: `Parking passes ${status.toLowerCase()}`, bodyHtml }), text };
+}
+
+export interface FeedbackEmailParams {
+  roomName: string;
+  startsAt: string;
+  endsAt: string;
+  url: string;
+}
+
+export function renderFeedbackRequestEmail(p: FeedbackEmailParams): RenderedEmail {
+  const intro = `Thanks for choosing Cue. How was your experience in ${p.roomName}?`;
+  const buttons = [1, 2, 3, 4, 5].map((rating) =>
+    `<a href="${escapeHtml(`${p.url}&r=${rating}`)}" aria-label="Rate ${rating} out of 5" style="display:inline-block;margin:0 8px 8px 0;padding:12px 17px;background:${NAVY};color:#fff;border-radius:6px;font-family:${FONT_SANS};font-size:18px;text-decoration:none;">${rating}</a>`
+  ).join("");
+  return {
+    subject: "How was your time at Cue?",
+    html: emailLayout({ title: "How did we do?", realLogo: true, bodyHtml:
+      paragraphHtml(intro) + summaryTableHtml([{ label: "Your visit", value: shortDateRange(p.startsAt, p.endsAt) }]) +
+      paragraphHtml("Choose a rating below — 1 is poor, 5 is excellent. You can add a comment on the next page.") +
+      `<div style="margin:20px 0 4px;">${buttons}</div>` + paragraphHtml("Your feedback helps us make the next visit better. Thank you, from all of us at Cue.") }),
+    text: [intro, shortDateRange(p.startsAt, p.endsAt), "1 is poor; 5 is excellent. Add an optional comment after choosing.",
+      ...[1,2,3,4,5].map((r) => `${r}/5: ${p.url}&r=${r}`), "Thank you, from all of us at Cue."].join("\n\n"),
+  };
+}
+
+export function renderHostFeedbackEmail(p: FeedbackEmailParams & { rating: number; comment: string; bookingId: string }): RenderedEmail {
+  const subject = `${p.rating <= 2 ? "ACTION NEEDED — " : ""}Cue feedback: ${p.rating}/5 · ${p.roomName}`;
+  const when = shortDateRange(p.startsAt, p.endsAt);
+  return {
+    subject,
+    html: emailLayout({ title: subject, realLogo: true, bodyHtml:
+      summaryTableHtml([{ label: "Room", value: p.roomName }, { label: "Visit", value: when }, { label: "Rating", value: `${p.rating}/5` }]) +
+      `<div style="white-space:pre-wrap;">${paragraphHtml(p.comment || "No comment added.")}</div>` + paragraphHtml(`Booking: ${p.bookingId}`) }),
+    text: `${p.roomName}\n${when}\nRating: ${p.rating}/5\n\n${p.comment || "No comment added."}\n\nBooking: ${p.bookingId}`,
+  };
 }

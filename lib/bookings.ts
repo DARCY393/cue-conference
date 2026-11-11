@@ -146,6 +146,7 @@ export function sanitizeBookingForApi(b: Booking): Booking {
 /** For unauthenticated, id-addressed endpoints: also strip the guest's name and email. */
 export function sanitizeBookingForPublic(b: Booking): Booking {
   const copy = sanitizeBookingForApi(b);
+  delete copy.feedback;
   delete copy.parkingRecipients;
   delete copy.parkingPassesIssuedBy;
   delete copy.guestEmail;
@@ -1345,6 +1346,8 @@ export async function chargeOvertime(id: string, extraMinutes: number, note?: st
 }
 
 async function withParkingRecipients(b: Booking): Promise<Booking> {
+  const { getFeedback } = await import("./feedback");
+  b = { ...b, feedback: await getFeedback(b.id) };
   if (!(b.parkingPasses ?? 0)) return b;
   const [recipients, meta] = await Promise.all([getParkingRecipients(b.id), getParkingMeta(b.id)]);
   return {

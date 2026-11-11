@@ -363,6 +363,10 @@ export default function HostPage() {
                       ? ` · parking: ${b.parkingPasses} pass${b.parkingPasses === 1 ? "" : "es"}/day (${formatMoney(b.parkingCents ?? 0)})`
                       : ""}
                   </div>
+                      {b.feedback && <div className="my-3 rounded-tile border border-cue-stone-200 p-3">
+                        <p className="font-semibold text-cue-navy-600">Guest feedback: {b.feedback.rating}/5{b.feedback.rating <= 2 ? " · ACTION NEEDED" : ""}</p>
+                        <p className="mt-1 whitespace-pre-wrap text-sm">{b.feedback.comment || "No comment added."}</p>
+                      </div>}
                   {(b.parkingPasses ?? 0) > 0 && ["accepted", "in_progress", "completed"].includes(b.status) && (
                     <div className="text-sm text-cue-stone-700" data-testid={`parking-recipients-${b.id}`}>
                       <span className="font-semibold text-cue-navy-600">Parking pass holders: </span>

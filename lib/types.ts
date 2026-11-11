@@ -180,6 +180,7 @@ export interface Booking {
   locationName?: string;
   spaceSlug?: string;
   /** Staff-only: who gets each parking pass (filled in by the guest after accept). */
+  feedback?: { rating: number; comment: string } | null;
   parkingRecipients?: { phone?: string; email?: string }[];
   parkingRecipientsUpdatedAt?: string;
   parkingPassesIssuedAt?: string;

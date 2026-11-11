@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "crypto";
 import { NextRequest } from "next/server";
-import { expireOverdueRequests } from "@/lib/bookings";
+import { sendDueFeedbackRequests } from "@/lib/feedback";
+import { completeFinishedBookings, expireOverdueRequests } from "@/lib/bookings";
 import { sendDueReminders } from "@/lib/reminders";
 import { sendDueParkingReminders, sendDueParkingStatusAlerts } from "@/lib/parking-recipients";
 import { jsonError, jsonOk } from "@/lib/http";
@@ -24,10 +25,13 @@ export async function POST(req: NextRequest) {
   }
 
   const result = await expireOverdueRequests();
+  await completeFinishedBookings();
+  const feedback = await sendDueFeedbackRequests();
   const reminders = await sendDueReminders();
   const parking = await sendDueParkingReminders();
   const parkingStatus = await sendDueParkingStatusAlerts();
   return jsonOk({
+    feedbackRequestsSent: feedback.sentIds.length,
     expiredCount: result.expiredIds.length,
     expiredIds: result.expiredIds,
     expiredDraftIds: result.expiredDraftIds,

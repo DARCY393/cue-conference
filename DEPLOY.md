@@ -598,3 +598,30 @@ PARKING_ALERT_EXTRA_TO=honeycomb-tenantadmin+parking@mail.grokbot.com
 ```
 
 Restart the service after changing it (no rebuild needed).
+
+## Post-booking feedback (migration 026)
+
+- Apply `026_booking_feedback.sql` through `npm run db:migrate`. Its singleton
+  `feedback_rollout.activated_at` is the durable deployment cutoff. Only completed
+  bookings whose **end time** is at/after this cutoff are eligible; delayed expiry
+  of older bookings cannot cause a backfill. Do not move the cutoff backwards.
+- Set `FEEDBACK_ENABLED=true` when approved for that deployment. Unset/false means
+  no scheduled feedback requests. Leave live untouched until approved.
+- The existing expiry script and HTTP cron complete finished bookings, then send at
+  9 AM America/Chicago the calendar day after checkout (or the first later run).
+  A missed run is caught up, including before 9 AM on later days. DST is wall-time based.
+- Preview still prefixes all subjects `[PREVIEW]`. Scheduled feedback requests on
+  preview are restricted to `@mail.grokbot.com` guest addresses as an additional guard.
+- Rating links record the rating in the browser, without mutating on an HTTP GET.
+  Submit saves the optional comment and emails HOST_EMAIL. No SMS or review links.
+  Unchanged repeated submissions do not send another host alert; changed submissions do.
+- Request and host notification timestamps are atomically claimed **before** SMTP
+  to prevent overlapping jobs/double clicks from sending twice. Explicit failures
+  release the claim for retry. A process crash after the claim may require staff
+  inspection of `message_logs` and clearing the claim manually; exactly-once delivery
+  cannot be guaranteed across a database and SMTP. Never blindly replay a sent email.
+- `message_logs` kinds: `feedback_request`, `host_feedback`. No Google review link.
+- Guest pages are token-protected, noindex, no-referrer, and dynamic. Comments are
+  limited to 4,000 characters and escaped in email; staff see them on booking cards.
+- For a local HTML email preview: `npx tsx scripts/render-feedback-email-preview.ts`.
+  Keep test mail in a local SMTP sink or use the test sender override; no real guests.

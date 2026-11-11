@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { sendDueFeedbackRequests } from "../lib/feedback";
 import { completeFinishedBookings, expireOverdueRequests } from "../lib/bookings";
 import { sendDueReminders } from "../lib/reminders";
 import { sendHostDecisionReminders } from "../lib/host-reminders";
@@ -51,6 +52,9 @@ async function main() {
   } else {
     console.log(`Sent ${parking.remindedIds.length} parking-list reminder(s): ${parking.remindedIds.join(", ")}`);
   }
+
+  const feedback = await sendDueFeedbackRequests();
+  console.log(`Sent ${feedback.sentIds.length} feedback request(s).`);
 
   const status = await sendDueParkingStatusAlerts();
   if (status.sentIds.length === 0) {
