@@ -72,6 +72,7 @@ export async function sendDueFeedbackRequests(now = new Date()): Promise<{ sentI
     if (!b || b.status !== "completed" || !b.guestEmail?.trim() || !feedbackIsDue(b.endsAt, now)) continue;
     // Preview feedback requests can never reach a real guest, even if enabled accidentally.
     if (process.env.CUE_APP_ENV === "preview" && !b.guestEmail.toLowerCase().endsWith("@mail.grokbot.com")) continue;
+    const email = renderFeedbackRequestEmail(await emailParams(b));
     if (isDemoMode()) {
       if (demoSent.has(id)) continue;
       demoSent.add(id);
@@ -80,7 +81,6 @@ export async function sendDueFeedbackRequests(now = new Date()): Promise<{ sentI
         WHERE id = $1 AND status = 'completed' AND feedback_request_sent_at IS NULL RETURNING id`, [id, now.toISOString()]);
       if (!claim.rowCount) continue;
     }
-    const email = renderFeedbackRequestEmail(await emailParams(b));
     const result = await getEmailSender().send({ to: b.guestEmail, bookingId: id, template: "feedback_request", ...email });
     if (result && result.status !== "sent") {
       if (isDemoMode()) demoSent.delete(id);
@@ -114,6 +114,7 @@ export async function saveFeedback(id: string, input: unknown, notifyHost: boole
     feedback = saved.rows[0];
   }
   if (!notifyHost) return { ok: true, feedback, alertStatus: "not_requested" };
+  const email = renderHostFeedbackEmail({ ...await emailParams(b), ...feedback, bookingId: id });
   if (isDemoMode()) {
     if (demoNotified.has(id)) return { ok: true, feedback, alertStatus: "unchanged" };
     demoNotified.add(id);
@@ -122,7 +123,6 @@ export async function saveFeedback(id: string, input: unknown, notifyHost: boole
       WHERE booking_id = $1 AND rating = $2 AND comment = $3 AND host_notified_at IS NULL RETURNING booking_id`, [id, feedback.rating, feedback.comment]);
     if (!claim.rowCount) return { ok: true, feedback, alertStatus: "unchanged" };
   }
-  const email = renderHostFeedbackEmail({ ...await emailParams(b), ...feedback, bookingId: id });
   const result = await getEmailSender().send({ to: process.env.HOST_EMAIL || HOST_EMAIL_DEFAULT, bookingId: id, template: "host_feedback", ...email });
   if (result && result.status !== "sent") {
     if (isDemoMode()) demoNotified.delete(id);
